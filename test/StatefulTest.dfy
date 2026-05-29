@@ -163,14 +163,14 @@ module StatefulTestExample {
     print "=== predicate-based RunTest demo ===\n";
     var rangeArb := Arbitrary<int>.Range(0, 100);
     // Deliberately failing predicate so we see the failure-report path.
-    RunTest((n: int) => n < 5, rangeArb, "n < 5 over Range(0, 100)");
+    var _ := RunTest((n: int) => n < 5, rangeArb, "n < 5 over Range(0, 100)");
 
     print "\n=== stateful RunModelTest demo (good commands) ===\n";
     var inc := new IncCmd();
     var dec := new DecCmd();
     var goodCmds := Arbitrary<Command<CounterModel>>.Of([inc, dec]);
     var factory := new CounterFactory();
-    RunModelTest<CounterModel>(
+    var _ := RunModelTest<CounterModel>(
       "counter: Always(value >= 0) with check-guarded Dec",
       goodCmds,
       AlwaysNonNegative(),
@@ -183,7 +183,7 @@ module StatefulTestExample {
     var badDec := new BadDecCmd();
     var badCmds := Arbitrary<Command<CounterModel>>.Of([inc2, badDec]);
     var factory2 := new CounterFactory();
-    RunModelTest<CounterModel>(
+    var _ := RunModelTest<CounterModel>(
       "counter: Always(value >= 0) with unguarded BadDec",
       badCmds,
       AlwaysNonNegative(),

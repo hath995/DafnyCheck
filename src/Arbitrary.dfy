@@ -43,14 +43,14 @@ module Arbitrary {
     }
 
     // Static factory method for creating TestCase from choices
-    static method ForChoices(choices: seq<bv64>, printResults: bool) returns (tc: TestCase)
+    static method ForChoices(choices: seq<bv64>, seed: bv64, printResults: bool) returns (tc: TestCase)
       requires 0 < |choices|
       ensures fresh(tc)
       ensures fresh(tc.random)
       ensures tc.Valid()
       ensures tc.prefix == choices
     {
-      var random := XoroShift128Plus.fromSeed(42); // Default seed
+      var random := XoroShift128Plus.fromSeed(seed);
       tc := new TestCase(choices, random, |choices|, printResults);
     }
 
@@ -419,7 +419,7 @@ module Arbitrary {
             ensures fresh(this)
             // ensures fresh(this.repr)
             requires 0 < |possibilities| < MaxLong
-            requires forall x,y :: x in possibilities && y in possibilities ==> x.internalFunction.repr !! y.internalFunction.repr
+            requires forall x,y :: x in possibilities && y in possibilities && x != y ==> x.internalFunction.repr !! y.internalFunction.repr
             requires forall i :: 0 <= i < |possibilities| ==> possibilities[i].Valid()
             ensures Valid()
         {
@@ -439,7 +439,8 @@ module Arbitrary {
             0 < |possibilities| < MaxLong && 
             (forall i :: 0 <= i < |possibilities| ==> possibilities[i].internalFunction in childRepr) &&
             (forall i :: 0 <= i < |possibilities| ==> possibilities[i].internalFunction.repr <= childRepr) &&
-            (forall x,y :: x in possibilities && y in possibilities ==> x.internalFunction.repr !! y.internalFunction.repr) &&
+            (forall x,y :: x in possibilities && y in possibilities && x != y ==> x.internalFunction.repr !! y.internalFunction.repr) &&
+            //New errror exception until further research
             (forall i :: 0 <= i < |possibilities| ==> possibilities[i].Valid()) &&
             childRepr < this.repr && 
             this.repr == {this} + childRepr
@@ -839,6 +840,540 @@ module Arbitrary {
         }
     }
 
+    // Heap-allocated 1-D array generator. Mirrors ListsTransformable to build a
+    // seq<S>, then copies it into a freshly-allocated array (the trait's Apply
+    // places no constraint on `result`, so returning a fresh array is sound).
+    class ArraysTransformable<S> extends Transformable<array<S>> {
+        var elementGenerator: Arbitrary<S>
+        var minSize: int
+        var maxSize: int
+        constructor(elementGenerator: Arbitrary<S>, minSize: int, maxSize: int)
+            requires 0 <= minSize <= maxSize
+            requires elementGenerator.Valid()
+            ensures elementGenerator.internalFunction.repr < this.repr
+            ensures this.repr == {this}+elementGenerator.internalFunction.repr
+            ensures fresh(this)
+            ensures Valid()
+        {
+            this.elementGenerator := elementGenerator;
+            this.minSize := minSize;
+            this.maxSize := maxSize;
+            this.childRepr := elementGenerator.internalFunction.repr;
+            this.repr := {this} + this.childRepr;
+        }
+        ghost predicate Valid()
+            decreases repr, childRepr
+            ensures Valid() ==> this in repr
+            ensures Valid() ==> childRepr < this.repr
+            ensures Valid() ==> this.repr == {this} + childRepr
+            reads this, repr, childRepr
+        {
+            this in this.repr &&
+            elementGenerator.internalFunction in this.repr &&
+            elementGenerator.internalFunction.repr < this.repr &&
+            0 <= minSize <= maxSize && elementGenerator.Valid() &&
+            childRepr < this.repr && this.repr == {this} + childRepr
+        }
+        method Apply(tc: TestCase) returns (result: array<S>)
+            requires allocated(tc)
+            requires tc.Valid()
+            requires this.Valid()
+            requires tc.repr !! this.repr
+            ensures this.Valid()
+            ensures tc.Valid()
+            ensures tc.repr == old(tc.repr)
+            ensures this.repr == old(this.repr)
+            decreases repr, childRepr
+            modifies tc, tc.random
+        {
+            var xs: seq<S> := [];
+            while true
+                invariant |xs| <= maxSize
+                invariant tc.Valid()
+                invariant tc.repr == old(tc.repr)
+                modifies tc, tc.random
+                decreases maxSize-|xs|
+            {
+                if |xs| < minSize {
+                    var forceResult := tc.ForcedChoice(1);
+                    if forceResult.err.Some? { break; }
+                } else if |xs| >= maxSize {
+                    var forceResult := tc.ForcedChoice(0);
+                    if forceResult.err.Some? { break; }
+                    break;
+                } else {
+                    var weightedResult := tc.WeightedInternal(0.9);
+                    if !weightedResult.value.Some? || !weightedResult.Unwrap() { break; }
+                }
+                var element := elementGenerator.internalFunction.Apply(tc);
+                xs := xs + [element];
+            }
+            result := new S[|xs|](idx requires 0 <= idx < |xs| => xs[idx]);
+        }
+    }
+
+    // Heap-allocated 2-D / 3-D array generators of FIXED size: the caller fixes
+    // the dimensions (rows x cols, rows x cols x layers) and every generated
+    // array has exactly that shape. Elements are generated into a flat seq and
+    // read through a guarded init function (so no nonlinear index-bound proof is
+    // needed); the flat seq always covers the whole array.
+    class Array2Transformable<S> extends Transformable<array2<S>> {
+        var elementGenerator: Arbitrary<S>
+        var rows: nat
+        var cols: nat
+        constructor(elementGenerator: Arbitrary<S>, rows: nat, cols: nat)
+            requires elementGenerator.Valid()
+            ensures elementGenerator.internalFunction.repr < this.repr
+            ensures this.repr == {this}+elementGenerator.internalFunction.repr
+            ensures fresh(this)
+            ensures Valid()
+        {
+            this.elementGenerator := elementGenerator;
+            this.rows := rows;
+            this.cols := cols;
+            this.childRepr := elementGenerator.internalFunction.repr;
+            this.repr := {this} + this.childRepr;
+        }
+        ghost predicate Valid()
+            decreases repr, childRepr
+            ensures Valid() ==> this in repr
+            ensures Valid() ==> childRepr < this.repr
+            ensures Valid() ==> this.repr == {this} + childRepr
+            reads this, repr, childRepr
+        {
+            this in this.repr &&
+            elementGenerator.internalFunction in this.repr &&
+            elementGenerator.internalFunction.repr < this.repr &&
+            elementGenerator.Valid() &&
+            childRepr < this.repr && this.repr == {this} + childRepr
+        }
+        method {:isolate_assertions} Apply(tc: TestCase) returns (result: array2<S>)
+            requires allocated(tc)
+            requires tc.Valid()
+            requires this.Valid()
+            requires tc.repr !! this.repr
+            ensures this.Valid()
+            ensures tc.Valid()
+            ensures tc.repr == old(tc.repr)
+            ensures this.repr == old(this.repr)
+            ensures result.Length0 == rows && result.Length1 == cols
+            decreases repr, childRepr
+            modifies tc, tc.random
+        {
+            var m: nat := rows;
+            var n: nat := cols;
+            var dflt := elementGenerator.internalFunction.Apply(tc);
+            var total := m * n;
+            var flat: seq<S> := [dflt];
+            while |flat| < total
+                invariant tc.Valid()
+                invariant tc.repr == old(tc.repr)
+                invariant 1 <= |flat|
+                decreases total - |flat|
+                modifies tc, tc.random
+            {
+                var el := elementGenerator.internalFunction.Apply(tc);
+                flat := flat + [el];
+            }
+            result := new S[m, n]((i: nat, j: nat) => if i * n + j < |flat| then flat[i * n + j] else dflt);
+        }
+    }
+
+    class Array3Transformable<S> extends Transformable<array3<S>> {
+        var elementGenerator: Arbitrary<S>
+        var rows: nat
+        var cols: nat
+        var layers: nat
+        constructor(elementGenerator: Arbitrary<S>, rows: nat, cols: nat, layers: nat)
+            requires elementGenerator.Valid()
+            ensures elementGenerator.internalFunction.repr < this.repr
+            ensures this.repr == {this}+elementGenerator.internalFunction.repr
+            ensures fresh(this)
+            ensures Valid()
+        {
+            this.elementGenerator := elementGenerator;
+            this.rows := rows;
+            this.cols := cols;
+            this.layers := layers;
+            this.childRepr := elementGenerator.internalFunction.repr;
+            this.repr := {this} + this.childRepr;
+        }
+        ghost predicate Valid()
+            decreases repr, childRepr
+            ensures Valid() ==> this in repr
+            ensures Valid() ==> childRepr < this.repr
+            ensures Valid() ==> this.repr == {this} + childRepr
+            reads this, repr, childRepr
+        {
+            this in this.repr &&
+            elementGenerator.internalFunction in this.repr &&
+            elementGenerator.internalFunction.repr < this.repr &&
+            elementGenerator.Valid() &&
+            childRepr < this.repr && this.repr == {this} + childRepr
+        }
+        method {:isolate_assertions} Apply(tc: TestCase) returns (result: array3<S>)
+            requires allocated(tc)
+            requires tc.Valid()
+            requires this.Valid()
+            requires tc.repr !! this.repr
+            ensures this.Valid()
+            ensures tc.Valid()
+            ensures tc.repr == old(tc.repr)
+            ensures this.repr == old(this.repr)
+            ensures result.Length0 == rows && result.Length1 == cols && result.Length2 == layers
+            decreases repr, childRepr
+            modifies tc, tc.random
+        {
+            var m: nat := rows;
+            var n: nat := cols;
+            var o: nat := layers;
+            var dflt := elementGenerator.internalFunction.Apply(tc);
+            var total := m * n * o;
+            var flat: seq<S> := [dflt];
+            while |flat| < total
+                invariant tc.Valid()
+                invariant tc.repr == old(tc.repr)
+                invariant 1 <= |flat|
+                decreases total - |flat|
+                modifies tc, tc.random
+            {
+                var el := elementGenerator.internalFunction.Apply(tc);
+                flat := flat + [el];
+            }
+            result := new S[m, n, o]((i: nat, j: nat, k: nat) =>
+                var idx := i * n * o + j * o + k;
+                if idx < |flat| then flat[idx] else dflt);
+        }
+    }
+
+    // ================================================================
+    // Core leaf generators for additional Dafny value types. Each follows
+    // the BoolsTransformable template (no child generators: childRepr = {},
+    // repr = {this} + childRepr). MakeChoice has no proven upper bound on its
+    // result, so where a cast needs one we discharge it with the same
+    // {:axiom} assume the StringsTransformable above uses for chars.
+    // ================================================================
+
+    // Natural numbers in [0, bound). `bound` is informational; values are
+    // drawn modulo it at runtime (bv64 -> nat is always nonnegative).
+    class NatsTransformable extends Transformable<nat> {
+        var bound: nat
+        constructor(bound: nat)
+            requires 0 < bound <= MaxLong
+            ensures fresh(this)
+            ensures fresh(this.repr)
+            ensures Valid()
+        {
+            this.bound := bound;
+            this.childRepr := {};
+            this.repr := {this} + this.childRepr;
+        }
+        ghost predicate Valid()
+            reads this
+            ensures Valid() ==> this in repr
+            ensures Valid() ==> childRepr < this.repr
+            ensures Valid() ==> this.repr == {this} + childRepr
+            decreases repr, childRepr
+        {
+            this.repr == {this} + childRepr && childRepr < this.repr && 0 < bound <= MaxLong
+        }
+        method Apply(tc: TestCase) returns (result: nat)
+            requires allocated(tc)
+            requires this.Valid()
+            requires tc.repr !! this.repr
+            ensures this.repr == old(this.repr)
+            requires tc.Valid()
+            ensures tc.Valid()
+            ensures tc.repr == old(tc.repr)
+            decreases repr, childRepr
+            modifies tc, tc.random
+        {
+            var c := tc.MakeChoice(bound as bv64);
+            if c.value.Some? {
+                result := c.Unwrap() as nat;
+            } else {
+                result := 0;
+            }
+        }
+    }
+
+    // Printable-ASCII characters in [32, 127).
+    class CharsTransformable extends Transformable<char> {
+        constructor()
+            ensures fresh(this)
+            ensures fresh(this.repr)
+            ensures Valid()
+        {
+            this.childRepr := {};
+            this.repr := {this} + this.childRepr;
+        }
+        ghost predicate Valid()
+            reads this
+            ensures Valid() ==> this in repr
+            ensures Valid() ==> childRepr < this.repr
+            ensures Valid() ==> this.repr == {this} + childRepr
+            decreases repr, childRepr
+        {
+            this.repr == {this} + childRepr && childRepr < this.repr
+        }
+        method Apply(tc: TestCase) returns (result: char)
+            requires allocated(tc)
+            requires this.Valid()
+            requires tc.repr !! this.repr
+            ensures this.repr == old(this.repr)
+            requires tc.Valid()
+            ensures tc.Valid()
+            ensures tc.repr == old(tc.repr)
+            decreases repr, childRepr
+            modifies tc, tc.random
+        {
+            var c := tc.MakeChoice(95);
+            var v := if c.value.Some? then c.Unwrap() as int else 0;
+            assume {:axiom} 0 <= v < 95;
+            result := (32 + v) as char;
+        }
+    }
+
+    // Non-negative rationals, generated as numerator / (denominator + 1).
+    class RealsTransformable extends Transformable<real> {
+        constructor()
+            ensures fresh(this)
+            ensures fresh(this.repr)
+            ensures Valid()
+        {
+            this.childRepr := {};
+            this.repr := {this} + this.childRepr;
+        }
+        ghost predicate Valid()
+            reads this
+            ensures Valid() ==> this in repr
+            ensures Valid() ==> childRepr < this.repr
+            ensures Valid() ==> this.repr == {this} + childRepr
+            decreases repr, childRepr
+        {
+            this.repr == {this} + childRepr && childRepr < this.repr
+        }
+        method Apply(tc: TestCase) returns (result: real)
+            requires allocated(tc)
+            requires this.Valid()
+            requires tc.repr !! this.repr
+            ensures this.repr == old(this.repr)
+            requires tc.Valid()
+            ensures tc.Valid()
+            ensures tc.repr == old(tc.repr)
+            decreases repr, childRepr
+            modifies tc, tc.random
+        {
+            var cn := tc.MakeChoice(1000000);
+            var num := if cn.value.Some? then cn.Unwrap() as int else 0;
+            var cd := tc.MakeChoice(1000);
+            var den := if cd.value.Some? then cd.Unwrap() as int else 0;
+            result := (num as real) / ((den + 1) as real);
+        }
+    }
+
+    // ----------------------------------------------------------------
+    // Fixed-width bit-vector generators. Widths up to 64 draw one choice and
+    // narrow it (bound discharged by {:axiom} like the char path); 128 and 256
+    // assemble multiple 64-bit words with widening casts (no bound needed).
+    // ----------------------------------------------------------------
+    class BitVectors1Transformable extends Transformable<bv1> {
+        constructor() ensures fresh(this) ensures fresh(this.repr) ensures Valid()
+        { this.childRepr := {}; this.repr := {this} + this.childRepr; }
+        ghost predicate Valid()
+            reads this
+            ensures Valid() ==> this in repr
+            ensures Valid() ==> childRepr < this.repr
+            ensures Valid() ==> this.repr == {this} + childRepr
+            decreases repr, childRepr
+        { this.repr == {this} + childRepr && childRepr < this.repr }
+        method Apply(tc: TestCase) returns (result: bv1)
+            requires allocated(tc) requires this.Valid() requires tc.repr !! this.repr
+            ensures this.repr == old(this.repr)
+            requires tc.Valid() ensures tc.Valid() ensures tc.repr == old(tc.repr)
+            decreases repr, childRepr modifies tc, tc.random
+        {
+            var c := tc.MakeChoice(2);
+            var v := if c.value.Some? then c.Unwrap() else 0;
+            assume {:axiom} v < 2;
+            result := v as bv1;
+        }
+    }
+
+    class BitVectors2Transformable extends Transformable<bv2> {
+        constructor() ensures fresh(this) ensures fresh(this.repr) ensures Valid()
+        { this.childRepr := {}; this.repr := {this} + this.childRepr; }
+        ghost predicate Valid()
+            reads this
+            ensures Valid() ==> this in repr
+            ensures Valid() ==> childRepr < this.repr
+            ensures Valid() ==> this.repr == {this} + childRepr
+            decreases repr, childRepr
+        { this.repr == {this} + childRepr && childRepr < this.repr }
+        method Apply(tc: TestCase) returns (result: bv2)
+            requires allocated(tc) requires this.Valid() requires tc.repr !! this.repr
+            ensures this.repr == old(this.repr)
+            requires tc.Valid() ensures tc.Valid() ensures tc.repr == old(tc.repr)
+            decreases repr, childRepr modifies tc, tc.random
+        {
+            var c := tc.MakeChoice(4);
+            var v := if c.value.Some? then c.Unwrap() else 0;
+            assume {:axiom} v < 4;
+            result := v as bv2;
+        }
+    }
+
+    class BitVectors8Transformable extends Transformable<bv8> {
+        constructor() ensures fresh(this) ensures fresh(this.repr) ensures Valid()
+        { this.childRepr := {}; this.repr := {this} + this.childRepr; }
+        ghost predicate Valid()
+            reads this
+            ensures Valid() ==> this in repr
+            ensures Valid() ==> childRepr < this.repr
+            ensures Valid() ==> this.repr == {this} + childRepr
+            decreases repr, childRepr
+        { this.repr == {this} + childRepr && childRepr < this.repr }
+        method Apply(tc: TestCase) returns (result: bv8)
+            requires allocated(tc) requires this.Valid() requires tc.repr !! this.repr
+            ensures this.repr == old(this.repr)
+            requires tc.Valid() ensures tc.Valid() ensures tc.repr == old(tc.repr)
+            decreases repr, childRepr modifies tc, tc.random
+        {
+            var c := tc.MakeChoice(256);
+            var v := if c.value.Some? then c.Unwrap() else 0;
+            assume {:axiom} v < 256;
+            result := v as bv8;
+        }
+    }
+
+    class BitVectors16Transformable extends Transformable<bv16> {
+        constructor() ensures fresh(this) ensures fresh(this.repr) ensures Valid()
+        { this.childRepr := {}; this.repr := {this} + this.childRepr; }
+        ghost predicate Valid()
+            reads this
+            ensures Valid() ==> this in repr
+            ensures Valid() ==> childRepr < this.repr
+            ensures Valid() ==> this.repr == {this} + childRepr
+            decreases repr, childRepr
+        { this.repr == {this} + childRepr && childRepr < this.repr }
+        method Apply(tc: TestCase) returns (result: bv16)
+            requires allocated(tc) requires this.Valid() requires tc.repr !! this.repr
+            ensures this.repr == old(this.repr)
+            requires tc.Valid() ensures tc.Valid() ensures tc.repr == old(tc.repr)
+            decreases repr, childRepr modifies tc, tc.random
+        {
+            var c := tc.MakeChoice(0x10000);
+            var v := if c.value.Some? then c.Unwrap() else 0;
+            assume {:axiom} v < 0x10000;
+            result := v as bv16;
+        }
+    }
+
+    class BitVectors32Transformable extends Transformable<bv32> {
+        constructor() ensures fresh(this) ensures fresh(this.repr) ensures Valid()
+        { this.childRepr := {}; this.repr := {this} + this.childRepr; }
+        ghost predicate Valid()
+            reads this
+            ensures Valid() ==> this in repr
+            ensures Valid() ==> childRepr < this.repr
+            ensures Valid() ==> this.repr == {this} + childRepr
+            decreases repr, childRepr
+        { this.repr == {this} + childRepr && childRepr < this.repr }
+        method Apply(tc: TestCase) returns (result: bv32)
+            requires allocated(tc) requires this.Valid() requires tc.repr !! this.repr
+            ensures this.repr == old(this.repr)
+            requires tc.Valid() ensures tc.Valid() ensures tc.repr == old(tc.repr)
+            decreases repr, childRepr modifies tc, tc.random
+        {
+            var c := tc.MakeChoice(0x100000000);
+            var v := if c.value.Some? then c.Unwrap() else 0;
+            assume {:axiom} v < 0x100000000;
+            result := v as bv32;
+        }
+    }
+
+    class BitVectors64Transformable extends Transformable<bv64> {
+        constructor() ensures fresh(this) ensures fresh(this.repr) ensures Valid()
+        { this.childRepr := {}; this.repr := {this} + this.childRepr; }
+        ghost predicate Valid()
+            reads this
+            ensures Valid() ==> this in repr
+            ensures Valid() ==> childRepr < this.repr
+            ensures Valid() ==> this.repr == {this} + childRepr
+            decreases repr, childRepr
+        { this.repr == {this} + childRepr && childRepr < this.repr }
+        method Apply(tc: TestCase) returns (result: bv64)
+            requires allocated(tc) requires this.Valid() requires tc.repr !! this.repr
+            ensures this.repr == old(this.repr)
+            requires tc.Valid() ensures tc.Valid() ensures tc.repr == old(tc.repr)
+            decreases repr, childRepr modifies tc, tc.random
+        {
+            var c := tc.MakeChoice(MaxLong as bv64);
+            result := if c.value.Some? then c.Unwrap() else 0;
+        }
+    }
+
+    class BitVectors128Transformable extends Transformable<bv128> {
+        constructor() ensures fresh(this) ensures fresh(this.repr) ensures Valid()
+        { this.childRepr := {}; this.repr := {this} + this.childRepr; }
+        ghost predicate Valid()
+            reads this
+            ensures Valid() ==> this in repr
+            ensures Valid() ==> childRepr < this.repr
+            ensures Valid() ==> this.repr == {this} + childRepr
+            decreases repr, childRepr
+        { this.repr == {this} + childRepr && childRepr < this.repr }
+        method Apply(tc: TestCase) returns (result: bv128)
+            requires allocated(tc) requires this.Valid() requires tc.repr !! this.repr
+            ensures this.repr == old(this.repr)
+            requires tc.Valid() ensures tc.Valid() ensures tc.repr == old(tc.repr)
+            decreases repr, childRepr modifies tc, tc.random
+        {
+            var c1 := tc.MakeChoice(MaxLong as bv64);
+            var hi := if c1.value.Some? then c1.Unwrap() else 0;
+            var c2 := tc.MakeChoice(MaxLong as bv64);
+            var lo := if c2.value.Some? then c2.Unwrap() else 0;
+            result := ((hi as bv128) << 64) | (lo as bv128);
+        }
+    }
+
+    class BitVectors256Transformable extends Transformable<bv256> {
+        constructor() ensures fresh(this) ensures fresh(this.repr) ensures Valid()
+        { this.childRepr := {}; this.repr := {this} + this.childRepr; }
+        ghost predicate Valid()
+            reads this
+            ensures Valid() ==> this in repr
+            ensures Valid() ==> childRepr < this.repr
+            ensures Valid() ==> this.repr == {this} + childRepr
+            decreases repr, childRepr
+        { this.repr == {this} + childRepr && childRepr < this.repr }
+        method Apply(tc: TestCase) returns (result: bv256)
+            requires allocated(tc) requires this.Valid() requires tc.repr !! this.repr
+            ensures this.repr == old(this.repr)
+            requires tc.Valid() ensures tc.Valid() ensures tc.repr == old(tc.repr)
+            decreases repr, childRepr modifies tc, tc.random
+        {
+            var c1 := tc.MakeChoice(MaxLong as bv64);
+            var w0 := if c1.value.Some? then c1.Unwrap() else 0;
+            var c2 := tc.MakeChoice(MaxLong as bv64);
+            var w1 := if c2.value.Some? then c2.Unwrap() else 0;
+            var c3 := tc.MakeChoice(MaxLong as bv64);
+            var w2 := if c3.value.Some? then c3.Unwrap() else 0;
+            var c4 := tc.MakeChoice(MaxLong as bv64);
+            var w3 := if c4.value.Some? then c4.Unwrap() else 0;
+            result := ((w0 as bv256) << 192) | ((w1 as bv256) << 128) |
+                      ((w2 as bv256) << 64) | (w3 as bv256);
+        }
+    }
+
+    // Build a map from a sequence of key/value pairs (later-listed keys win,
+    // matching Dafny map-update order). Used to derive the Maps generator from
+    // a Lists-of-Tuples generator without a bespoke Transformable.
+    function SeqToMap<K, V>(pairs: seq<(K, V)>): map<K, V> {
+        if |pairs| == 0 then map[]
+        else SeqToMap(pairs[1..])[pairs[0].0 := pairs[0].1]
+    }
+
     datatype Arbitrary<T> = Arbitrary(internalFunction: Transformable<T>) {
 
 
@@ -934,6 +1469,448 @@ module Arbitrary {
         {
             var boolsTransformable := new BoolsTransformable();
             p := Arbitrary(boolsTransformable);
+        }
+
+        static method Nats(bound: nat) returns (p: Arbitrary<nat>)
+            requires 0 < bound <= MaxLong
+            ensures p.Valid()
+            ensures fresh(p.internalFunction)
+            ensures fresh(p.internalFunction.repr)
+        {
+            var t := new NatsTransformable(bound);
+            p := Arbitrary(t);
+        }
+
+        static method Chars() returns (p: Arbitrary<char>)
+            ensures p.Valid()
+            ensures fresh(p.internalFunction)
+            ensures fresh(p.internalFunction.repr)
+        {
+            var t := new CharsTransformable();
+            p := Arbitrary(t);
+        }
+
+        static method Reals() returns (p: Arbitrary<real>)
+            ensures p.Valid()
+            ensures fresh(p.internalFunction)
+            ensures fresh(p.internalFunction.repr)
+        {
+            var t := new RealsTransformable();
+            p := Arbitrary(t);
+        }
+
+        static method BitVectors1() returns (p: Arbitrary<bv1>)
+            ensures p.Valid() ensures fresh(p.internalFunction) ensures fresh(p.internalFunction.repr)
+        { var t := new BitVectors1Transformable(); p := Arbitrary(t); }
+
+        static method BitVectors2() returns (p: Arbitrary<bv2>)
+            ensures p.Valid() ensures fresh(p.internalFunction) ensures fresh(p.internalFunction.repr)
+        { var t := new BitVectors2Transformable(); p := Arbitrary(t); }
+
+        static method BitVectors8() returns (p: Arbitrary<bv8>)
+            ensures p.Valid() ensures fresh(p.internalFunction) ensures fresh(p.internalFunction.repr)
+        { var t := new BitVectors8Transformable(); p := Arbitrary(t); }
+
+        static method BitVectors16() returns (p: Arbitrary<bv16>)
+            ensures p.Valid() ensures fresh(p.internalFunction) ensures fresh(p.internalFunction.repr)
+        { var t := new BitVectors16Transformable(); p := Arbitrary(t); }
+
+        static method BitVectors32() returns (p: Arbitrary<bv32>)
+            ensures p.Valid() ensures fresh(p.internalFunction) ensures fresh(p.internalFunction.repr)
+        { var t := new BitVectors32Transformable(); p := Arbitrary(t); }
+
+        static method BitVectors64() returns (p: Arbitrary<bv64>)
+            ensures p.Valid() ensures fresh(p.internalFunction) ensures fresh(p.internalFunction.repr)
+        { var t := new BitVectors64Transformable(); p := Arbitrary(t); }
+
+        static method BitVectors128() returns (p: Arbitrary<bv128>)
+            ensures p.Valid() ensures fresh(p.internalFunction) ensures fresh(p.internalFunction.repr)
+        { var t := new BitVectors128Transformable(); p := Arbitrary(t); }
+
+        static method BitVectors256() returns (p: Arbitrary<bv256>)
+            ensures p.Valid() ensures fresh(p.internalFunction) ensures fresh(p.internalFunction.repr)
+        { var t := new BitVectors256Transformable(); p := Arbitrary(t); }
+
+        // Collections derived from the verified Lists/Tuple/Map combinators —
+        // generate a seq and project it to the target collection type.
+        static method Sets<S(==)>(elementGenerator: Arbitrary<S>, minSize: int, maxSize: int)
+            returns (p: Arbitrary<set<S>>)
+            requires 0 <= minSize <= maxSize
+            requires elementGenerator.Valid()
+            ensures p.Valid()
+        {
+            var listGen := Lists<S>(elementGenerator, minSize, maxSize);
+            p := listGen.Map((xs: seq<S>) => (set x | x in xs));
+        }
+
+        static method Multisets<S(==)>(elementGenerator: Arbitrary<S>, minSize: int, maxSize: int)
+            returns (p: Arbitrary<multiset<S>>)
+            requires 0 <= minSize <= maxSize
+            requires elementGenerator.Valid()
+            ensures p.Valid()
+        {
+            var listGen := Lists<S>(elementGenerator, minSize, maxSize);
+            p := listGen.Map((xs: seq<S>) => multiset(xs));
+        }
+
+        static method Maps<K(==), V>(keyGen: Arbitrary<K>, valGen: Arbitrary<V>, minSize: int, maxSize: int)
+            returns (p: Arbitrary<map<K, V>>)
+            requires 0 <= minSize <= maxSize
+            requires keyGen.Valid() && valGen.Valid()
+            requires keyGen.internalFunction.repr !! valGen.internalFunction.repr
+            ensures p.Valid()
+        {
+            var pairGen := Tuple<K, V>(keyGen, valGen);
+            var listGen := Lists<(K, V)>(pairGen, minSize, maxSize);
+            p := listGen.Map((pairs: seq<(K, V)>) => SeqToMap(pairs));
+        }
+
+        static method Arrays<S>(elementGenerator: Arbitrary<S>, minSize: int, maxSize: int)
+            returns (p: Arbitrary<array<S>>)
+            requires 0 <= minSize <= maxSize
+            requires elementGenerator.Valid()
+            ensures p.Valid()
+            ensures fresh(p.internalFunction)
+            ensures fresh(elementGenerator.internalFunction) ==> fresh(p.internalFunction.repr)
+        {
+            var t := new ArraysTransformable<S>(elementGenerator, minSize, maxSize);
+            p := Arbitrary(t);
+        }
+
+        // Fixed-size 2-D array generator: every value is a rows x cols array2<S>.
+        static method Array2<S>(elementGenerator: Arbitrary<S>, rows: nat, cols: nat)
+            returns (p: Arbitrary<array2<S>>)
+            requires elementGenerator.Valid()
+            ensures p.Valid()
+            ensures fresh(p.internalFunction)
+            ensures fresh(elementGenerator.internalFunction) ==> fresh(p.internalFunction.repr)
+        {
+            var t := new Array2Transformable<S>(elementGenerator, rows, cols);
+            p := Arbitrary(t);
+        }
+
+        // Fixed-size 3-D array generator: every value is a rows x cols x layers array3<S>.
+        static method Array3<S>(elementGenerator: Arbitrary<S>, rows: nat, cols: nat, layers: nat)
+            returns (p: Arbitrary<array3<S>>)
+            requires elementGenerator.Valid()
+            ensures p.Valid()
+            ensures fresh(p.internalFunction)
+            ensures fresh(elementGenerator.internalFunction) ==> fresh(p.internalFunction.repr)
+        {
+            var t := new Array3Transformable<S>(elementGenerator, rows, cols, layers);
+            p := Arbitrary(t);
+        }
+
+        // n-tuple generators (3..10). Each is defined in terms of the previous
+        // one: TupleN(a1..aN) = Map(Tuple(a1, Tuple{N-1}(a2..aN))) flattened.
+        // Because the (N-1)-tuple is already flat, the flatten lambda is shallow.
+        // Inputs must have pairwise-disjoint representation sets (typically true
+        // for independently-built arbitraries). Each method exposes a small
+        // repr-shape postcondition (inputs' reprs are contained, everything else
+        // is fresh) so the next level can discharge Tuple's disjointness.
+        static method Tuple3<A, B, C>(a: Arbitrary<A>, b: Arbitrary<B>, c: Arbitrary<C>)
+            returns (p: Arbitrary<(A, B, C)>)
+            requires a.Valid() && b.Valid() && c.Valid()
+            requires a.internalFunction.repr !! b.internalFunction.repr
+            requires a.internalFunction.repr !! c.internalFunction.repr
+            requires b.internalFunction.repr !! c.internalFunction.repr
+            ensures p.Valid()
+            ensures a.internalFunction.repr + b.internalFunction.repr + c.internalFunction.repr
+                    <= p.internalFunction.repr
+            ensures fresh(p.internalFunction.repr -
+                    (a.internalFunction.repr + b.internalFunction.repr + c.internalFunction.repr))
+        {
+            var rest := Tuple<B, C>(b, c);
+            var u := Tuple<A, (B, C)>(a, rest);
+            p := u.Map((x: (A, (B, C))) => (x.0, x.1.0, x.1.1));
+        }
+
+        static method Tuple4<A, B, C, D>(a: Arbitrary<A>, b: Arbitrary<B>, c: Arbitrary<C>, d: Arbitrary<D>)
+            returns (p: Arbitrary<(A, B, C, D)>)
+            requires a.Valid() && b.Valid() && c.Valid() && d.Valid()
+            requires a.internalFunction.repr !! b.internalFunction.repr
+            requires a.internalFunction.repr !! c.internalFunction.repr
+            requires a.internalFunction.repr !! d.internalFunction.repr
+            requires b.internalFunction.repr !! c.internalFunction.repr
+            requires b.internalFunction.repr !! d.internalFunction.repr
+            requires c.internalFunction.repr !! d.internalFunction.repr
+            ensures p.Valid()
+            ensures a.internalFunction.repr + b.internalFunction.repr + c.internalFunction.repr +
+                    d.internalFunction.repr <= p.internalFunction.repr
+            ensures fresh(p.internalFunction.repr -
+                    (a.internalFunction.repr + b.internalFunction.repr + c.internalFunction.repr +
+                     d.internalFunction.repr))
+        {
+            var rest := Tuple3<B, C, D>(b, c, d);
+            var u := Tuple<A, (B, C, D)>(a, rest);
+            p := u.Map((x: (A, (B, C, D))) => (x.0, x.1.0, x.1.1, x.1.2));
+        }
+
+        static method Tuple5<A, B, C, D, E>(a: Arbitrary<A>, b: Arbitrary<B>, c: Arbitrary<C>,
+                d: Arbitrary<D>, e: Arbitrary<E>)
+            returns (p: Arbitrary<(A, B, C, D, E)>)
+            requires a.Valid() && b.Valid() && c.Valid() && d.Valid() && e.Valid()
+            requires a.internalFunction.repr !! b.internalFunction.repr
+            requires a.internalFunction.repr !! c.internalFunction.repr
+            requires a.internalFunction.repr !! d.internalFunction.repr
+            requires a.internalFunction.repr !! e.internalFunction.repr
+            requires b.internalFunction.repr !! c.internalFunction.repr
+            requires b.internalFunction.repr !! d.internalFunction.repr
+            requires b.internalFunction.repr !! e.internalFunction.repr
+            requires c.internalFunction.repr !! d.internalFunction.repr
+            requires c.internalFunction.repr !! e.internalFunction.repr
+            requires d.internalFunction.repr !! e.internalFunction.repr
+            ensures p.Valid()
+            ensures a.internalFunction.repr + b.internalFunction.repr + c.internalFunction.repr +
+                    d.internalFunction.repr + e.internalFunction.repr <= p.internalFunction.repr
+            ensures fresh(p.internalFunction.repr -
+                    (a.internalFunction.repr + b.internalFunction.repr + c.internalFunction.repr +
+                     d.internalFunction.repr + e.internalFunction.repr))
+        {
+            var rest := Tuple4<B, C, D, E>(b, c, d, e);
+            var u := Tuple<A, (B, C, D, E)>(a, rest);
+            p := u.Map((x: (A, (B, C, D, E))) => (x.0, x.1.0, x.1.1, x.1.2, x.1.3));
+        }
+
+        static method Tuple6<A, B, C, D, E, F>(a: Arbitrary<A>, b: Arbitrary<B>, c: Arbitrary<C>,
+                d: Arbitrary<D>, e: Arbitrary<E>, f: Arbitrary<F>)
+            returns (p: Arbitrary<(A, B, C, D, E, F)>)
+            requires a.Valid() && b.Valid() && c.Valid() && d.Valid() && e.Valid() && f.Valid()
+            requires a.internalFunction.repr !! b.internalFunction.repr
+            requires a.internalFunction.repr !! c.internalFunction.repr
+            requires a.internalFunction.repr !! d.internalFunction.repr
+            requires a.internalFunction.repr !! e.internalFunction.repr
+            requires a.internalFunction.repr !! f.internalFunction.repr
+            requires b.internalFunction.repr !! c.internalFunction.repr
+            requires b.internalFunction.repr !! d.internalFunction.repr
+            requires b.internalFunction.repr !! e.internalFunction.repr
+            requires b.internalFunction.repr !! f.internalFunction.repr
+            requires c.internalFunction.repr !! d.internalFunction.repr
+            requires c.internalFunction.repr !! e.internalFunction.repr
+            requires c.internalFunction.repr !! f.internalFunction.repr
+            requires d.internalFunction.repr !! e.internalFunction.repr
+            requires d.internalFunction.repr !! f.internalFunction.repr
+            requires e.internalFunction.repr !! f.internalFunction.repr
+            ensures p.Valid()
+            ensures a.internalFunction.repr + b.internalFunction.repr + c.internalFunction.repr +
+                    d.internalFunction.repr + e.internalFunction.repr + f.internalFunction.repr
+                    <= p.internalFunction.repr
+            ensures fresh(p.internalFunction.repr -
+                    (a.internalFunction.repr + b.internalFunction.repr + c.internalFunction.repr +
+                     d.internalFunction.repr + e.internalFunction.repr + f.internalFunction.repr))
+        {
+            var rest := Tuple5<B, C, D, E, F>(b, c, d, e, f);
+            var u := Tuple<A, (B, C, D, E, F)>(a, rest);
+            p := u.Map((x: (A, (B, C, D, E, F))) => (x.0, x.1.0, x.1.1, x.1.2, x.1.3, x.1.4));
+        }
+
+        static method Tuple7<A, B, C, D, E, F, G>(a: Arbitrary<A>, b: Arbitrary<B>, c: Arbitrary<C>,
+                d: Arbitrary<D>, e: Arbitrary<E>, f: Arbitrary<F>, g: Arbitrary<G>)
+            returns (p: Arbitrary<(A, B, C, D, E, F, G)>)
+            requires a.Valid() && b.Valid() && c.Valid() && d.Valid() && e.Valid() && f.Valid() && g.Valid()
+            requires a.internalFunction.repr !! b.internalFunction.repr
+            requires a.internalFunction.repr !! c.internalFunction.repr
+            requires a.internalFunction.repr !! d.internalFunction.repr
+            requires a.internalFunction.repr !! e.internalFunction.repr
+            requires a.internalFunction.repr !! f.internalFunction.repr
+            requires a.internalFunction.repr !! g.internalFunction.repr
+            requires b.internalFunction.repr !! c.internalFunction.repr
+            requires b.internalFunction.repr !! d.internalFunction.repr
+            requires b.internalFunction.repr !! e.internalFunction.repr
+            requires b.internalFunction.repr !! f.internalFunction.repr
+            requires b.internalFunction.repr !! g.internalFunction.repr
+            requires c.internalFunction.repr !! d.internalFunction.repr
+            requires c.internalFunction.repr !! e.internalFunction.repr
+            requires c.internalFunction.repr !! f.internalFunction.repr
+            requires c.internalFunction.repr !! g.internalFunction.repr
+            requires d.internalFunction.repr !! e.internalFunction.repr
+            requires d.internalFunction.repr !! f.internalFunction.repr
+            requires d.internalFunction.repr !! g.internalFunction.repr
+            requires e.internalFunction.repr !! f.internalFunction.repr
+            requires e.internalFunction.repr !! g.internalFunction.repr
+            requires f.internalFunction.repr !! g.internalFunction.repr
+            ensures p.Valid()
+            ensures a.internalFunction.repr + b.internalFunction.repr + c.internalFunction.repr +
+                    d.internalFunction.repr + e.internalFunction.repr + f.internalFunction.repr +
+                    g.internalFunction.repr <= p.internalFunction.repr
+            ensures fresh(p.internalFunction.repr -
+                    (a.internalFunction.repr + b.internalFunction.repr + c.internalFunction.repr +
+                     d.internalFunction.repr + e.internalFunction.repr + f.internalFunction.repr +
+                     g.internalFunction.repr))
+        {
+            var rest := Tuple6<B, C, D, E, F, G>(b, c, d, e, f, g);
+            var u := Tuple<A, (B, C, D, E, F, G)>(a, rest);
+            p := u.Map((x: (A, (B, C, D, E, F, G))) => (x.0, x.1.0, x.1.1, x.1.2, x.1.3, x.1.4, x.1.5));
+        }
+
+        static method Tuple8<A, B, C, D, E, F, G, H>(a: Arbitrary<A>, b: Arbitrary<B>, c: Arbitrary<C>,
+                d: Arbitrary<D>, e: Arbitrary<E>, f: Arbitrary<F>, g: Arbitrary<G>, h: Arbitrary<H>)
+            returns (p: Arbitrary<(A, B, C, D, E, F, G, H)>)
+            requires a.Valid() && b.Valid() && c.Valid() && d.Valid() && e.Valid() && f.Valid() && g.Valid() && h.Valid()
+            requires a.internalFunction.repr !! b.internalFunction.repr
+            requires a.internalFunction.repr !! c.internalFunction.repr
+            requires a.internalFunction.repr !! d.internalFunction.repr
+            requires a.internalFunction.repr !! e.internalFunction.repr
+            requires a.internalFunction.repr !! f.internalFunction.repr
+            requires a.internalFunction.repr !! g.internalFunction.repr
+            requires a.internalFunction.repr !! h.internalFunction.repr
+            requires b.internalFunction.repr !! c.internalFunction.repr
+            requires b.internalFunction.repr !! d.internalFunction.repr
+            requires b.internalFunction.repr !! e.internalFunction.repr
+            requires b.internalFunction.repr !! f.internalFunction.repr
+            requires b.internalFunction.repr !! g.internalFunction.repr
+            requires b.internalFunction.repr !! h.internalFunction.repr
+            requires c.internalFunction.repr !! d.internalFunction.repr
+            requires c.internalFunction.repr !! e.internalFunction.repr
+            requires c.internalFunction.repr !! f.internalFunction.repr
+            requires c.internalFunction.repr !! g.internalFunction.repr
+            requires c.internalFunction.repr !! h.internalFunction.repr
+            requires d.internalFunction.repr !! e.internalFunction.repr
+            requires d.internalFunction.repr !! f.internalFunction.repr
+            requires d.internalFunction.repr !! g.internalFunction.repr
+            requires d.internalFunction.repr !! h.internalFunction.repr
+            requires e.internalFunction.repr !! f.internalFunction.repr
+            requires e.internalFunction.repr !! g.internalFunction.repr
+            requires e.internalFunction.repr !! h.internalFunction.repr
+            requires f.internalFunction.repr !! g.internalFunction.repr
+            requires f.internalFunction.repr !! h.internalFunction.repr
+            requires g.internalFunction.repr !! h.internalFunction.repr
+            ensures p.Valid()
+            ensures a.internalFunction.repr + b.internalFunction.repr + c.internalFunction.repr +
+                    d.internalFunction.repr + e.internalFunction.repr + f.internalFunction.repr +
+                    g.internalFunction.repr + h.internalFunction.repr <= p.internalFunction.repr
+            ensures fresh(p.internalFunction.repr -
+                    (a.internalFunction.repr + b.internalFunction.repr + c.internalFunction.repr +
+                     d.internalFunction.repr + e.internalFunction.repr + f.internalFunction.repr +
+                     g.internalFunction.repr + h.internalFunction.repr))
+        {
+            var rest := Tuple7<B, C, D, E, F, G, H>(b, c, d, e, f, g, h);
+            var u := Tuple<A, (B, C, D, E, F, G, H)>(a, rest);
+            p := u.Map((x: (A, (B, C, D, E, F, G, H))) =>
+                (x.0, x.1.0, x.1.1, x.1.2, x.1.3, x.1.4, x.1.5, x.1.6));
+        }
+
+        static method Tuple9<A, B, C, D, E, F, G, H, I>(a: Arbitrary<A>, b: Arbitrary<B>, c: Arbitrary<C>,
+                d: Arbitrary<D>, e: Arbitrary<E>, f: Arbitrary<F>, g: Arbitrary<G>, h: Arbitrary<H>, i: Arbitrary<I>)
+            returns (p: Arbitrary<(A, B, C, D, E, F, G, H, I)>)
+            requires a.Valid() && b.Valid() && c.Valid() && d.Valid() && e.Valid() && f.Valid() && g.Valid() && h.Valid() && i.Valid()
+            requires a.internalFunction.repr !! b.internalFunction.repr
+            requires a.internalFunction.repr !! c.internalFunction.repr
+            requires a.internalFunction.repr !! d.internalFunction.repr
+            requires a.internalFunction.repr !! e.internalFunction.repr
+            requires a.internalFunction.repr !! f.internalFunction.repr
+            requires a.internalFunction.repr !! g.internalFunction.repr
+            requires a.internalFunction.repr !! h.internalFunction.repr
+            requires a.internalFunction.repr !! i.internalFunction.repr
+            requires b.internalFunction.repr !! c.internalFunction.repr
+            requires b.internalFunction.repr !! d.internalFunction.repr
+            requires b.internalFunction.repr !! e.internalFunction.repr
+            requires b.internalFunction.repr !! f.internalFunction.repr
+            requires b.internalFunction.repr !! g.internalFunction.repr
+            requires b.internalFunction.repr !! h.internalFunction.repr
+            requires b.internalFunction.repr !! i.internalFunction.repr
+            requires c.internalFunction.repr !! d.internalFunction.repr
+            requires c.internalFunction.repr !! e.internalFunction.repr
+            requires c.internalFunction.repr !! f.internalFunction.repr
+            requires c.internalFunction.repr !! g.internalFunction.repr
+            requires c.internalFunction.repr !! h.internalFunction.repr
+            requires c.internalFunction.repr !! i.internalFunction.repr
+            requires d.internalFunction.repr !! e.internalFunction.repr
+            requires d.internalFunction.repr !! f.internalFunction.repr
+            requires d.internalFunction.repr !! g.internalFunction.repr
+            requires d.internalFunction.repr !! h.internalFunction.repr
+            requires d.internalFunction.repr !! i.internalFunction.repr
+            requires e.internalFunction.repr !! f.internalFunction.repr
+            requires e.internalFunction.repr !! g.internalFunction.repr
+            requires e.internalFunction.repr !! h.internalFunction.repr
+            requires e.internalFunction.repr !! i.internalFunction.repr
+            requires f.internalFunction.repr !! g.internalFunction.repr
+            requires f.internalFunction.repr !! h.internalFunction.repr
+            requires f.internalFunction.repr !! i.internalFunction.repr
+            requires g.internalFunction.repr !! h.internalFunction.repr
+            requires g.internalFunction.repr !! i.internalFunction.repr
+            requires h.internalFunction.repr !! i.internalFunction.repr
+            ensures p.Valid()
+            ensures a.internalFunction.repr + b.internalFunction.repr + c.internalFunction.repr +
+                    d.internalFunction.repr + e.internalFunction.repr + f.internalFunction.repr +
+                    g.internalFunction.repr + h.internalFunction.repr + i.internalFunction.repr
+                    <= p.internalFunction.repr
+            ensures fresh(p.internalFunction.repr -
+                    (a.internalFunction.repr + b.internalFunction.repr + c.internalFunction.repr +
+                     d.internalFunction.repr + e.internalFunction.repr + f.internalFunction.repr +
+                     g.internalFunction.repr + h.internalFunction.repr + i.internalFunction.repr))
+        {
+            var rest := Tuple8<B, C, D, E, F, G, H, I>(b, c, d, e, f, g, h, i);
+            var u := Tuple<A, (B, C, D, E, F, G, H, I)>(a, rest);
+            p := u.Map((x: (A, (B, C, D, E, F, G, H, I))) =>
+                (x.0, x.1.0, x.1.1, x.1.2, x.1.3, x.1.4, x.1.5, x.1.6, x.1.7));
+        }
+
+        static method Tuple10<A, B, C, D, E, F, G, H, I, J>(a: Arbitrary<A>, b: Arbitrary<B>, c: Arbitrary<C>,
+                d: Arbitrary<D>, e: Arbitrary<E>, f: Arbitrary<F>, g: Arbitrary<G>, h: Arbitrary<H>,
+                i: Arbitrary<I>, j: Arbitrary<J>)
+            returns (p: Arbitrary<(A, B, C, D, E, F, G, H, I, J)>)
+            requires a.Valid() && b.Valid() && c.Valid() && d.Valid() && e.Valid() && f.Valid() && g.Valid() && h.Valid() && i.Valid() && j.Valid()
+            requires a.internalFunction.repr !! b.internalFunction.repr
+            requires a.internalFunction.repr !! c.internalFunction.repr
+            requires a.internalFunction.repr !! d.internalFunction.repr
+            requires a.internalFunction.repr !! e.internalFunction.repr
+            requires a.internalFunction.repr !! f.internalFunction.repr
+            requires a.internalFunction.repr !! g.internalFunction.repr
+            requires a.internalFunction.repr !! h.internalFunction.repr
+            requires a.internalFunction.repr !! i.internalFunction.repr
+            requires a.internalFunction.repr !! j.internalFunction.repr
+            requires b.internalFunction.repr !! c.internalFunction.repr
+            requires b.internalFunction.repr !! d.internalFunction.repr
+            requires b.internalFunction.repr !! e.internalFunction.repr
+            requires b.internalFunction.repr !! f.internalFunction.repr
+            requires b.internalFunction.repr !! g.internalFunction.repr
+            requires b.internalFunction.repr !! h.internalFunction.repr
+            requires b.internalFunction.repr !! i.internalFunction.repr
+            requires b.internalFunction.repr !! j.internalFunction.repr
+            requires c.internalFunction.repr !! d.internalFunction.repr
+            requires c.internalFunction.repr !! e.internalFunction.repr
+            requires c.internalFunction.repr !! f.internalFunction.repr
+            requires c.internalFunction.repr !! g.internalFunction.repr
+            requires c.internalFunction.repr !! h.internalFunction.repr
+            requires c.internalFunction.repr !! i.internalFunction.repr
+            requires c.internalFunction.repr !! j.internalFunction.repr
+            requires d.internalFunction.repr !! e.internalFunction.repr
+            requires d.internalFunction.repr !! f.internalFunction.repr
+            requires d.internalFunction.repr !! g.internalFunction.repr
+            requires d.internalFunction.repr !! h.internalFunction.repr
+            requires d.internalFunction.repr !! i.internalFunction.repr
+            requires d.internalFunction.repr !! j.internalFunction.repr
+            requires e.internalFunction.repr !! f.internalFunction.repr
+            requires e.internalFunction.repr !! g.internalFunction.repr
+            requires e.internalFunction.repr !! h.internalFunction.repr
+            requires e.internalFunction.repr !! i.internalFunction.repr
+            requires e.internalFunction.repr !! j.internalFunction.repr
+            requires f.internalFunction.repr !! g.internalFunction.repr
+            requires f.internalFunction.repr !! h.internalFunction.repr
+            requires f.internalFunction.repr !! i.internalFunction.repr
+            requires f.internalFunction.repr !! j.internalFunction.repr
+            requires g.internalFunction.repr !! h.internalFunction.repr
+            requires g.internalFunction.repr !! i.internalFunction.repr
+            requires g.internalFunction.repr !! j.internalFunction.repr
+            requires h.internalFunction.repr !! i.internalFunction.repr
+            requires h.internalFunction.repr !! j.internalFunction.repr
+            requires i.internalFunction.repr !! j.internalFunction.repr
+            ensures p.Valid()
+            ensures a.internalFunction.repr + b.internalFunction.repr + c.internalFunction.repr +
+                    d.internalFunction.repr + e.internalFunction.repr + f.internalFunction.repr +
+                    g.internalFunction.repr + h.internalFunction.repr + i.internalFunction.repr +
+                    j.internalFunction.repr <= p.internalFunction.repr
+            ensures fresh(p.internalFunction.repr -
+                    (a.internalFunction.repr + b.internalFunction.repr + c.internalFunction.repr +
+                     d.internalFunction.repr + e.internalFunction.repr + f.internalFunction.repr +
+                     g.internalFunction.repr + h.internalFunction.repr + i.internalFunction.repr +
+                     j.internalFunction.repr))
+        {
+            var rest := Tuple9<B, C, D, E, F, G, H, I, J>(b, c, d, e, f, g, h, i, j);
+            var u := Tuple<A, (B, C, D, E, F, G, H, I, J)>(a, rest);
+            p := u.Map((x: (A, (B, C, D, E, F, G, H, I, J))) =>
+                (x.0, x.1.0, x.1.1, x.1.2, x.1.3, x.1.4, x.1.5, x.1.6, x.1.7, x.1.8));
         }
 
         static method Lists<S>(elementGenerator: Arbitrary<S>, minSize: int, maxSize: int) returns (p: Arbitrary<seq<S>>)

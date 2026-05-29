@@ -72,10 +72,10 @@ module MinithesisTest {
     ensures fresh(state.testFunction)
     ensures state.Valid()
   {
-    var rng := new SimpleRandomGen();
+    var rng := new SimpleRandomGen(42);
     var tf := new ChoicePredicateTest(pred);
     assume {:axiom} rng !in tf.repr && rng.random !in tf.repr;
-    state := new TestingState<bv64>(rng, tf, 1000);
+    state := new TestingState<bv64>(rng, tf, 1000, 42, None);
   }
 
   // ============================================================
@@ -286,7 +286,7 @@ module MinithesisTest {
     var arb := Arbitrary<int>.Range(0, 1000);
     var pred := (i: int) => i > 256 || i < 24;
     print "\n[E2E single int] start\n";
-    RunTestWithExamples(pred, arb, "E2E_single_int", 100);
+    var _ := RunTestWithExamples(pred, arb, "E2E_single_int", 100);
     print "[E2E single int] done\n";
   }
 
@@ -297,7 +297,7 @@ module MinithesisTest {
     var arb := Arbitrary<seq<int>>.Lists(inner, 1, 100);
     var pred := (xs: seq<int>) => SumSeq(xs) <= 1000;
     print "\n[E2E list sum] start\n";
-    RunTestWithExamples(pred, arb, "E2E_list_sum", 100);
+    var _ := RunTestWithExamples(pred, arb, "E2E_list_sum", 100);
     print "[E2E list sum] done\n";
   }
 
@@ -309,7 +309,7 @@ module MinithesisTest {
     // Pass = "size < 4 OR all unique"; fail = duplicate in size>=4 list.
     var pred := (xs: seq<int>) => |xs| < 4 || AllUnique(xs);
     print "\n[E2E unique values] start\n";
-    RunTestWithExamples(pred, arb, "E2E_unique_values", 100);
+    var _ := RunTestWithExamples(pred, arb, "E2E_unique_values", 100);
     print "[E2E unique values] done\n";
   }
 
@@ -512,7 +512,7 @@ module MinithesisTest {
     var arb := Arbitrary<seq<int>>.Lists(inner, 0, 5);
     var sut := new BuggyDedup();
     print "\n[method-test buggy dedup] start\n";
-    RunMethodTestWithExamples(arb, sut, "method-test buggy dedup", 100);
+    var _ := RunMethodTestWithExamples(arb, sut, "method-test buggy dedup", 100);
     print "[method-test buggy dedup] done\n";
   }
 
@@ -522,7 +522,7 @@ module MinithesisTest {
     var arb := Arbitrary<seq<int>>.Lists(inner, 0, 10);
     var sut := new BuggyBinarySearch();
     print "\n[method-test buggy binsearch] start\n";
-    RunMethodTestWithExamples(arb, sut, "method-test buggy binsearch", 100);
+    var _ := RunMethodTestWithExamples(arb, sut, "method-test buggy binsearch", 100);
     print "[method-test buggy binsearch] done\n";
   }
 }

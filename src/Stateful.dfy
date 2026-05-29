@@ -21,6 +21,8 @@ module StatefulTesting {
   import M = DafnyCheck
   import opened LTL
   import opened LTLUtils
+  import opened RunConfig
+  import Reporting
 
   // Predicate-based property: takes one input drawn from an Arbitrary<T>.
   type PropertyTest<!T> = T -> bool
@@ -56,11 +58,12 @@ module StatefulTesting {
       ensures fresh(sys)
   }
 
-  // Top-level predicate-based RunTest — delegates straight to Minithesis.
-  method RunTest<T(!new)>(test: PropertyTest<T>, arb: Arbitrary<T>, name: string)
+  // Top-level predicate-based RunTest — delegates straight to DafnyCheck.
+  // Returns true iff every generated case passed.
+  method RunTest<T(!new)>(test: PropertyTest<T>, arb: Arbitrary<T>, name: string) returns (passed: bool)
     requires arb.Valid()
   {
-    M.RunTest(test, arb, name);
+    passed := M.RunTest(test, arb, name);
   }
 
   // The model-test runner wraps one test case (one execution of a randomly
@@ -182,33 +185,70 @@ module StatefulTesting {
   // Top-level stateful runner. Builds the per-test ModelTestFunction, runs
   // it inside Minithesis's TestingState (so we benefit from generation +
   // shrink-on-choices), then prints a summary keyed by the user's `name`.
-  method  RunModelTest<Model(!new)>(
+  // Default-config model test: 100 runs, seed 42, color on, Low verbosity.
+  method RunModelTest<Model(!new)>(
     name: string,
     cmds: Arbitrary<Command<Model>>,
     ltlProperty: LTLFormula<Model>,
     initialModel: Model,
     factory: SystemFactory,
     maxSteps: nat)
+    returns (passed: bool)
+    requires cmds.Valid()
+    requires WellFormedFormula(ltlProperty)
+    requires 0 < maxSteps
+    decreases 0
+  {
+    passed := RunModelTestWithConfig(name, cmds, ltlProperty, initialModel, factory, maxSteps,
+                                     100, 42, true, Low);
+  }
+
+  // Config-driven model test. Per the v1 scope, model tests honor run count,
+  // seed, color, and verbosity but not the classifier/examples of RunConfig
+  // (commands aren't readily classifiable), so those knobs are explicit params
+  // rather than a RunConfig value.
+  method RunModelTestWithConfig<Model(!new)>(
+    name: string,
+    cmds: Arbitrary<Command<Model>>,
+    ltlProperty: LTLFormula<Model>,
+    initialModel: Model,
+    factory: SystemFactory,
+    maxSteps: nat,
+    numRuns: nat,
+    seed: bv64,
+    useColor: bool,
+    verbosity: Verbosity)
+    returns (passed: bool)
     requires cmds.Valid()
     requires WellFormedFormula(ltlProperty)
     requires 0 < maxSteps
     decreases 0
   {
     var mtf := new ModelTestFunction<Model>(cmds, initialModel, factory, ltlProperty, maxSteps);
-    var rng := new M.SimpleRandomGen();
-    var state := new M.TestingState<()>(rng, mtf, 100);
+    var rng := new M.SimpleRandomGen(seed);
+    var nr := if numRuns == 0 then 1 else numRuns;
+    var state := new M.TestingState<()>(rng, mtf, nr, seed, None);
     state.Run();
 
     var res := state.GetResult();
     var valid := state.GetValidTestCases();
     match res {
       case None =>
-        print "[", name, "] PASS (", valid, " valid runs)\n";
+        if valid == 0 {
+          Reporting.ReportUnsatisfiable(name, useColor, verbosity);
+          passed := false;
+        } else {
+          Reporting.ReportSuccess(name, valid, useColor, verbosity);
+          passed := true;
+        }
       case Some(choices) =>
-        print "[", name, "] FAIL\n";
-        print "  violated tags: ", TagsToString(mtf.lastFailureTags), "\n";
-        print "  commands: [", StringJoin(mtf.lastCommandTrace, ", "), "]\n";
-        print "  minimised choices: ", choices, "\n";
+        passed := false;
+        Reporting.ReportFailure(name, useColor, verbosity);
+        if verbosity != Off {
+          print "  violated tags: ", TagsToString(mtf.lastFailureTags), "\n";
+          print "  commands: [", StringJoin(mtf.lastCommandTrace, ", "), "]\n";
+          print "  minimised choices: ", choices, "\n";
+        }
     }
   }
 }

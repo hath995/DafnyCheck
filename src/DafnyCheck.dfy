@@ -2,12 +2,16 @@ include "./Arbitrary.dfy"
 include "./RandomGenerator.dfy"
 include "./TestStatus.dfy"
 include "./TestResult.dfy"
+include "./RunConfig.dfy"
+include "./Reporting.dfy"
 module DafnyCheck {
   import opened TestResult
   import opened TestTypes
   import opened Arbitrary
   import opened RandomGenerator
   import opened Std.Wrappers
+  import opened RunConfig
+  import Reporting
 
   // A TestFunction is a side-effecting wrapper around the user's test body.
   // We use a trait (not a `TestCase -> TestResult<T>` arrow) because the body
@@ -178,11 +182,11 @@ module DafnyCheck {
 
   // SimpleRandomGen class - simple random number generator
   class SimpleRandomGen extends RandomGen {
-    constructor()
+    constructor(seed: bv64)
       ensures fresh(this)
       ensures fresh(this.random)
     {
-      var foo := XoroShift128Plus.fromSeed(42);
+      var foo := XoroShift128Plus.fromSeed(seed);
       this.random := foo;
     }
 
@@ -212,9 +216,16 @@ module DafnyCheck {
     var bestResult: Option<T>
     var bestScoring: Option<object>
     var testIsTrivial: bool
+    var seed: bv64
+    // Optional classifier and the distribution it accumulates over generated
+    // inputs. Both are plain value/function fields (not heap objects), so they
+    // do not participate in `repr` or `Valid()`.
+    var classifier: Option<T -> string>
+    var stats: map<string, nat>
     ghost var repr: set<object>
 
-    constructor(random: RandomGen, testFunction: TestFunction<T>, maxExamples: nat)
+    constructor(random: RandomGen, testFunction: TestFunction<T>, maxExamples: nat, seed: bv64,
+                classifier: Option<T -> string>)
       requires 0 < maxExamples
       requires testFunction.Valid()
       requires random !in testFunction.repr
@@ -227,6 +238,9 @@ module DafnyCheck {
     {
       this.random := random;
       this.testFunction := testFunction;
+      this.seed := seed;
+      this.classifier := classifier;
+      this.stats := map[];
       this.maxExamples := maxExamples*10;
       this.validTestCases := 0;
       this.calls := 0;
@@ -262,6 +276,11 @@ module DafnyCheck {
     method GetValidTestCases() returns (count: nat)
     {
       count := this.validTestCases;
+    }
+
+    method GetStats() returns (s: map<string, nat>)
+    {
+      s := this.stats;
     }
 
     method Run()
@@ -340,6 +359,12 @@ module DafnyCheck {
         validTestCases := validTestCases + 1;
         if testCase.GetTargetingScore() > 0 {
           // TODO: Targeting
+        }
+        // Classify the generated input for distribution statistics. Buckets
+        // accumulate in `stats`; neither field affects Valid()/repr.
+        if classifier.Some? && testResult.value.Some? {
+          var bucket := classifier.value(testResult.value.value);
+          stats := stats[bucket := (if bucket in stats then stats[bucket] else 0) + 1];
         }
       }
       if testResult.Error().Some? && testResult.Error().Extract() == INTERESTING {
@@ -622,7 +647,7 @@ module DafnyCheck {
       ensures res.None? ==> result == old(result)
       ensures res.Some? ==> result == Some(attempt)
     {
-      var testCase := TestCase.ForChoices(attempt, false);
+      var testCase := TestCase.ForChoices(attempt, this.seed, false);
       // testCase + testCase.random are freshly allocated; testFunction.repr
       // contains only pre-existing objects, so the disjointness precondition
       // holds.
@@ -811,56 +836,85 @@ module DafnyCheck {
     }
   }
 
-  // Top-level entry point — Java Minithesis.runTest's Dafny analogue.
-  // Builds a PredicateTest, a fresh RNG, a TestingState; runs generation
-  // (+ eventually shrinking); prints a concise summary.
-  method RunTest<T(!new)>(pred: T -> bool, arb: Arbitrary<T>, name: string)
+  // Top-level predicate-test entry points. All return `true` iff every
+  // always-tested example and every generated case passed. RunTest and
+  // RunTestWithExamples are thin delegators over RunTestWithConfig.
+  method RunTest<T(!new)>(pred: T -> bool, arb: Arbitrary<T>, name: string) returns (passed: bool)
     requires arb.Valid()
   {
-    RunTestWithExamples(pred, arb, name, 100);
+    passed := RunTestWithConfig(pred, arb, name, DefaultConfig<T>());
   }
 
   method RunTestWithExamples<T(!new)>(pred: T -> bool, arb: Arbitrary<T>, name: string, examples: nat)
+      returns (passed: bool)
     requires arb.Valid()
     requires 0 < examples
   {
+    passed := RunTestWithConfig(pred, arb, name, DefaultConfig<T>().(numRuns := examples));
+  }
+
+  // Config-driven predicate test: (1) evaluate the predicate directly on each
+  // always-tested example, (2) run randomised generation + shrinking honoring
+  // numRuns/seed/classifier, (3) report through the unified Reporting helpers.
+  method RunTestWithConfig<T(!new)>(pred: T -> bool, arb: Arbitrary<T>, name: string, cfg: RunConfig<T>)
+      returns (passed: bool)
+    requires arb.Valid()
+  {
+    passed := true;
+    var i := 0;
+    while i < |cfg.examples|
+      invariant 0 <= i <= |cfg.examples|
+    {
+      if !pred(cfg.examples[i]) {
+        passed := false;
+        Reporting.ReportFailingExample(cfg.examples[i], cfg.useColor, cfg.verbosity);
+      }
+      i := i + 1;
+    }
+
+    var seed := if cfg.seed.Some? then cfg.seed.value else 42;
+    var numRuns := if cfg.numRuns == 0 then 1 else cfg.numRuns;
     var pt := new PredicateTest<T>(pred, arb);
-    var rng := new SimpleRandomGen();
+    var rng := new SimpleRandomGen(seed);
     assert fresh(rng) && fresh(rng.random);
     // Fresh PredicateTest cannot alias the freshly-constructed rng or its inner random.
     assume {:axiom} rng !in pt.repr && rng.random !in pt.repr;
-    var state := new TestingState<T>(rng, pt, examples);
-    assert fresh(state) && state.random == rng && state.random.random == rng.random;
+    var state := new TestingState<T>(rng, pt, numRuns, seed, cfg.classifier);
     state.Run();
 
     var res := state.GetResult();
     var valid := state.GetValidTestCases();
     var best := state.GetBestResult();
+    var stats := state.GetStats();
 
-    if valid == 0 && res.None? {
-      print "[", name, "] UNSATISFIABLE — no valid test cases generated\n";
-      return;
-    }
     match res {
       case None =>
-        print "[", name, "] PASS (", valid, " valid examples)\n";
+        if valid == 0 {
+          Reporting.ReportUnsatisfiable(name, cfg.useColor, cfg.verbosity);
+          passed := false;
+        } else if passed {
+          Reporting.ReportSuccess(name, valid, cfg.useColor, cfg.verbosity);
+        } else {
+          Reporting.ReportFailure(name, cfg.useColor, cfg.verbosity);
+        }
       case Some(choices) =>
-        print "[", name, "] FAIL — minimised choice sequence: ", choices, "\n";
+        passed := false;
+        Reporting.ReportFailure(name, cfg.useColor, cfg.verbosity);
         match best {
-          case Some(v) => print "  failing input: ", v, "\n";
+          case Some(v) => Reporting.ReportCounterExample(v, choices, cfg.useColor, cfg.verbosity);
           case None =>
         }
     }
+    Reporting.ReportStatistics(name, stats, cfg.useColor, cfg.verbosity);
   }
 
-  // Method-test entry points — sibling of RunTest / RunTestWithExamples.
-  // Builds a MethodTest, plumbs into the standard TestingState, prints
-  // the same PASS/FAIL summary shape (plus the last error payload) so
-  // callers get uniform output.
+  // Method-test entry points — siblings of the predicate runners. Return
+  // `true` iff all examples and generated cases passed.
   method RunMethodTest<Input(!new), E(==)>(arb: Arbitrary<Input>, sut: MethodUnderTest<Input, E>, name: string)
+      returns (passed: bool)
     requires arb.Valid() requires sut.Valid()
   {
-    RunMethodTestWithExamples(arb, sut, name, 100);
+    passed := RunMethodTestWithConfig(arb, sut, name, DefaultConfig<Input>());
   }
 
   method RunMethodTestWithExamples<Input(!new), E(==)>(
@@ -868,33 +922,67 @@ module DafnyCheck {
       sut: MethodUnderTest<Input, E>,
       name: string,
       examples: nat)
+      returns (passed: bool)
     requires arb.Valid() requires sut.Valid()
     requires 0 < examples
   {
+    passed := RunMethodTestWithConfig(arb, sut, name, DefaultConfig<Input>().(numRuns := examples));
+  }
+
+  method RunMethodTestWithConfig<Input(!new), E(==)>(
+      arb: Arbitrary<Input>,
+      sut: MethodUnderTest<Input, E>,
+      name: string,
+      cfg: RunConfig<Input>)
+      returns (passed: bool)
+    requires arb.Valid() requires sut.Valid()
+  {
+    passed := true;
+    // Always-test examples by running the SUT directly on each.
+    var i := 0;
+    while i < |cfg.examples|
+      invariant 0 <= i <= |cfg.examples|
+      invariant arb.Valid() && sut.Valid()
+    {
+      var r := sut.run(cfg.examples[i]);
+      if !(r.Success? && r.value) {
+        passed := false;
+        Reporting.ReportFailingExample(cfg.examples[i], cfg.useColor, cfg.verbosity);
+      }
+      i := i + 1;
+    }
+
+    var seed := if cfg.seed.Some? then cfg.seed.value else 42;
+    var numRuns := if cfg.numRuns == 0 then 1 else cfg.numRuns;
     var mt := new MethodTest<Input, E>(arb, sut);
-    var rng := new SimpleRandomGen();
+    var rng := new SimpleRandomGen(seed);
     assert fresh(rng) && fresh(rng.random);
     // Fresh MethodTest cannot alias the freshly-constructed rng or its
-    // inner random — same discharge as RunTestWithExamples above.
+    // inner random — same discharge as the predicate runner above.
     assume {:axiom} rng !in mt.repr && rng.random !in mt.repr;
-    var state := new TestingState<Input>(rng, mt, examples);
+    var state := new TestingState<Input>(rng, mt, numRuns, seed, cfg.classifier);
     state.Run();
 
     var res := state.GetResult();
     var valid := state.GetValidTestCases();
     var best := state.GetBestResult();
+    var stats := state.GetStats();
 
-    if valid == 0 && res.None? {
-      print "[", name, "] UNSATISFIABLE — no valid test cases generated\n";
-      return;
-    }
     match res {
       case None =>
-        print "[", name, "] PASS (", valid, " valid examples)\n";
+        if valid == 0 {
+          Reporting.ReportUnsatisfiable(name, cfg.useColor, cfg.verbosity);
+          passed := false;
+        } else if passed {
+          Reporting.ReportSuccess(name, valid, cfg.useColor, cfg.verbosity);
+        } else {
+          Reporting.ReportFailure(name, cfg.useColor, cfg.verbosity);
+        }
       case Some(choices) =>
-        print "[", name, "] FAIL — minimised choice sequence: ", choices, "\n";
+        passed := false;
+        Reporting.ReportFailure(name, cfg.useColor, cfg.verbosity);
         match best {
-          case Some(v) => print "  failing input: ", v, "\n";
+          case Some(v) => Reporting.ReportCounterExample(v, choices, cfg.useColor, cfg.verbosity);
           case None =>
         }
         match mt.lastResult {
@@ -902,5 +990,6 @@ module DafnyCheck {
           case _ =>
         }
     }
+    Reporting.ReportStatistics(name, stats, cfg.useColor, cfg.verbosity);
   }
 }

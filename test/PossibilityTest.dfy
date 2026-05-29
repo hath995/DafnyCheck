@@ -76,6 +76,12 @@ module PossibilityTest {
         var res3 := rangeArb.Apply(tc);
         var res4 := rangeArb.Apply(tc);
         var res5 := rangeArb.Apply(tc);
+        // Each generated value must lie within the requested [5, 15) range.
+        expect 5 <= res1 < 15;
+        expect 5 <= res2 < 15;
+        expect 5 <= res3 < 15;
+        expect 5 <= res4 < 15;
+        expect 5 <= res5 < 15;
         print "\nRange res1, ", res1, "\n";
         print "Range res2, ", res2, "\n";
         print "Range res3, ", res3, "\n";
@@ -99,6 +105,11 @@ module PossibilityTest {
         var res3 := listsArb.Apply(tc);
         var res4 := listsArb.Apply(tc);
         var res5 := listsArb.Apply(tc);
+        // Length within [1, 10]; every element within the element generator's [1, 11).
+        expect 1 <= |res1| <= 10;
+        expect 1 <= |res2| <= 10;
+        expect forall i :: 0 <= i < |res1| ==> 1 <= res1[i] < 11;
+        expect forall i :: 0 <= i < |res2| ==> 1 <= res2[i] < 11;
         print "\nLists res1, ", res1, "\n";
         print "Lists res2, ", res2, "\n";
         print "Lists res3, ", res3, "\n";
@@ -117,6 +128,10 @@ module PossibilityTest {
         var res3 := stringsArb.Apply(tc);
         var res4 := stringsArb.Apply(tc);
         var res5 := stringsArb.Apply(tc);
+        // Length within the requested [0, 8] bound.
+        expect |res1| <= 8;
+        expect |res2| <= 8;
+        expect |res3| <= 8;
         print "\nStrings res1, ", res1, "\n";
         print "Strings res2, ", res2, "\n";
         print "Strings res3, ", res3, "\n";
@@ -136,6 +151,9 @@ module PossibilityTest {
         var res3 := mappedArb.Apply(tc);
         var res4 := mappedArb.Apply(tc);
         var res5 := mappedArb.Apply(tc);
+        // Range(1,11) doubled => even values within [2, 20].
+        expect 2 <= res1 <= 20 && res1 % 2 == 0;
+        expect 2 <= res2 <= 20 && res2 % 2 == 0;
         print "\nMap Int Transform res1, ", res1, "\n";
         print "Map Int Transform res2, ", res2, "\n";
         print "Map Int Transform res3, ", res3, "\n";
