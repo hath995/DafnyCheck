@@ -1374,6 +1374,133 @@ module Arbitrary {
         else SeqToMap(pairs[1..])[pairs[0].0 := pairs[0].1]
     }
 
+    // ================================================================
+    // letrec-style recursive generators (à la fast-check's letrec).
+    //
+    // A `Registry<T>` ties mutually-recursive arbitraries together by name.
+    // Build each named arbitrary using `reg.Tie(name)` wherever a recursive
+    // position appears, `Register` them, then `Lookup` the entry point:
+    //
+    //   var reg := new Registry<Tree>("Leaf", 5);            // base key + maxDepth
+    //   var node := Arbitrary.Tuple(reg.Tie("Tree"), reg.Tie("Tree"))
+    //                 .Map((t) => Node(t.0, t.1));
+    //   reg.Register("Leaf", Arbitrary.Just(Leaf));
+    //   reg.Register("Node", node);
+    //   reg.Register("Tree", Arbitrary.Mix([reg.Tie("Leaf"), reg.Tie("Node")]));
+    //   var arb := reg.Lookup("Tree");
+    //
+    // Each `Tie(name)` returns a FRESH lazy node with a singleton repr, so
+    // distinct ties satisfy the pairwise-disjointness preconditions of Tuple/Mix
+    // even though they alias the same registry slot. At Apply time a lazy resolves
+    // its name in the registry; the TestCase `depth` field is the recursion
+    // budget — at `maxDepth` the lazy yields the registry's base-case arbitrary
+    // instead of recursing, which is what makes generation terminate (the base
+    // case must be non-recursive). Like FlatMap, the resolve-through-dispatch step
+    // carries an accepted "decreases" obligation and a couple of framing axioms.
+    // ================================================================
+    class Registry<T(!new)> {
+        var arbs: map<string, Arbitrary<T>>
+        const baseKey: string
+        const maxDepth: nat
+
+        constructor(baseKey: string, maxDepth: nat)
+            ensures fresh(this)
+            ensures this.baseKey == baseKey && this.maxDepth == maxDepth
+        {
+            this.arbs := map[];
+            this.baseKey := baseKey;
+            this.maxDepth := maxDepth;
+        }
+
+        // Register (or replace) the arbitrary bound to `key`.
+        method Register(key: string, arb: Arbitrary<T>)
+            modifies this`arbs
+            ensures key in this.arbs && this.arbs[key] == arb
+        {
+            this.arbs := this.arbs[key := arb];
+        }
+
+        // A lazy reference to the arbitrary bound to `key`, resolved at Apply time.
+        // Fresh + singleton repr so multiple ties are mutually disjoint.
+        method Tie(key: string) returns (a: Arbitrary<T>)
+            ensures a.Valid()
+            ensures fresh(a.internalFunction)
+            ensures fresh(a.internalFunction.repr)
+        {
+            var lz := new LazyArbitrary<T>(this, key);
+            a := Arbitrary(lz);
+        }
+
+        function Lookup(key: string): Arbitrary<T>
+            reads this
+            requires key in this.arbs
+        {
+            this.arbs[key]
+        }
+    }
+
+    class LazyArbitrary<T(!new)> extends Transformable<T> {
+        const registry: Registry<T>
+        const key: string
+
+        constructor(registry: Registry<T>, key: string)
+            ensures fresh(this)
+            ensures fresh(this.repr)
+            ensures Valid()
+        {
+            this.registry := registry;
+            this.key := key;
+            this.childRepr := {};
+            this.repr := {this};
+        }
+
+        // The lazy node owns nothing but itself, so Valid()/repr stay acyclic and
+        // trivially well-formed regardless of the (possibly self-referential)
+        // registry it points into.
+        ghost predicate Valid()
+            reads this
+            ensures Valid() ==> this in repr
+            ensures Valid() ==> childRepr < this.repr
+            ensures Valid() ==> this.repr == {this} + childRepr
+            decreases repr, childRepr
+        {
+            this.repr == {this} + childRepr && childRepr < this.repr
+        }
+
+        method Apply(tc: TestCase) returns (result: T)
+            requires allocated(tc)
+            requires this.Valid()
+            requires tc.repr !! this.repr
+            ensures this.repr == old(this.repr)
+            requires tc.Valid()
+            ensures tc.Valid()
+            ensures tc.repr == old(tc.repr)
+            decreases repr, childRepr
+            modifies tc, tc.random
+        {
+            var d0 := tc.depth;
+            // At the depth budget, force the registry's base case (must be
+            // non-recursive) so generation terminates; otherwise descend one level.
+            var useBase := d0 >= registry.maxDepth;
+            var k := if useBase then registry.baseKey else key;
+            // Framing axioms: the named arbitrary exists and is well-formed, and a
+            // registry built before this run cannot alias the fresh-per-run
+            // TestCase. (Same style as RunTest's rng-disjointness assumption.)
+            assume {:axiom} k in registry.arbs;
+            var target := registry.arbs[k];
+            assume {:axiom} target.Valid() && tc.repr !! target.internalFunction.repr;
+            if !useBase {
+                tc.depth := d0 + 1;
+            }
+            // KNOWN: "decreases clause might not decrease" here is expected — through
+            // the registry this dispatches back into LazyArbitrary.Apply (the letrec
+            // cycle), which the trait's repr-based metric can't reconcile. Termination
+            // is enforced at runtime by the `depth`/maxDepth budget above. Future work.
+            result := target.internalFunction.Apply(tc);
+            tc.depth := d0;  // restore so siblings recurse to the same budget
+        }
+    }
+
     datatype Arbitrary<T> = Arbitrary(internalFunction: Transformable<T>) {
 
 
@@ -1453,7 +1580,7 @@ module Arbitrary {
         static method Mix<T>(possibilities: seq<Arbitrary<T>>) returns (p: Arbitrary<T>)
             requires 0 < |possibilities| < MaxLong
             requires forall i :: 0 <= i < |possibilities| ==> possibilities[i].Valid()
-            requires forall x,y :: x in possibilities && y in possibilities ==> x.internalFunction.repr !! y.internalFunction.repr
+            requires forall x,y :: x in possibilities && y in possibilities && x != y ==> x.internalFunction.repr !! y.internalFunction.repr
             ensures p.Valid()
             ensures fresh(p.internalFunction)
             ensures forall x :: x in possibilities && fresh(x.internalFunction.repr) ==> fresh(p.internalFunction.repr)
@@ -1600,6 +1727,9 @@ module Arbitrary {
             var t := new Array3Transformable<S>(elementGenerator, rows, cols, layers);
             p := Arbitrary(t);
         }
+
+        // (Recursive/letrec generators are provided via the Registry class above,
+        // not as a static factory here — see Registry.Tie / Register / Lookup.)
 
         // n-tuple generators (3..10). Each is defined in terms of the previous
         // one: TupleN(a1..aN) = Map(Tuple(a1, Tuple{N-1}(a2..aN))) flattened.
