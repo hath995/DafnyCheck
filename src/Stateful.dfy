@@ -227,7 +227,7 @@ module StatefulTesting {
     var mtf := new ModelTestFunction<Model>(cmds, initialModel, factory, ltlProperty, maxSteps);
     var rng := new M.SimpleRandomGen(seed);
     var nr := if numRuns == 0 then 1 else numRuns;
-    var state := new M.TestingState<()>(rng, mtf, nr, seed, None);
+    var state := new M.TestingState<()>(rng, mtf, nr, seed, None, verbosity, useColor);
     state.Run();
 
     var res := state.GetResult();

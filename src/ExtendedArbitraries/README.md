@@ -29,8 +29,13 @@ method Email() returns (p: Arbitrary<string>)  // <local>@<domain>, e.g. "abc@ex
 ## `Json.dfy` (module `ExtJson`)
 
 ```dafny
-method Json() returns (p: Arbitrary<string>)   // depth-1 JSON: number, quoted string, bool/null, small array, or 1-field object
+method Json() returns (p: Arbitrary<string>)   // recursive JSON value
 ```
+
+A `json` value is a `Mix` of null / bool / number / quoted string / array / object, where
+arrays and objects recurse back into `json` (built with the [`Registry`](../Arbitrary.md) letrec).
+`"null"` is the base case the depth budget bottoms out at, so generation terminates — e.g.
+`[{"nv9ad":null,"esiqtt":null},null,[null,null]]`.
 
 Usage mirrors the core generators — build, then apply via a `TestCase` or hand to a run method:
 

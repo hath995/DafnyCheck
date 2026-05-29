@@ -26,4 +26,14 @@ module ConfigTest {
     var passed := RunTestWithConfig((n: int) => 0 <= n < 100, arb, "examples-demo", cfg);
     expect !passed;
   }
+
+  method {:test} TestHighVerbosityTrace() {
+    // A failing predicate so generation finds a counterexample and then shrinks.
+    // At Verbosity.High the run traces every generated value + choice sequence and
+    // every accepted shrink step before the final counterexample.
+    var arb := Arbitrary<int>.Range(0, 1000);
+    var cfg := DefaultConfig<int>().(seed := Some(1), numRuns := 20, verbosity := High, useColor := false);
+    var passed := RunTestWithConfig((n: int) => n < 500, arb, "n < 500 (high verbosity)", cfg);
+    expect !passed;
+  }
 }

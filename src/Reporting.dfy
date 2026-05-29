@@ -65,7 +65,19 @@ module Reporting {
     }
   }
 
-  // Report a single shrink step (High verbosity only).
+  // Trace one generated value and its choice sequence (High verbosity only).
+  method ReportGenerated<T>(value: Option<T>, choices: seq<bv64>, valid: bool, useColor: bool, verbosity: Verbosity)
+  {
+    if AtLeast(verbosity, High) {
+      print "  ", Colorize("gen", CYAN, useColor), if valid then " ok   " else " skip ", "choices=", choices;
+      if value.Some? {
+        print " value=", value.value;
+      }
+      print "\n";
+    }
+  }
+
+  // Report a single accepted shrink step (High verbosity only).
   method ReportShrink(before: seq<bv64>, after: seq<bv64>, useColor: bool, verbosity: Verbosity)
   {
     if AtLeast(verbosity, High) {

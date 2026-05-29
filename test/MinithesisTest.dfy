@@ -18,6 +18,7 @@ module MinithesisTest {
   import opened RandomGenerator
   import opened TestResult
   import opened TestTypes
+  import opened RunConfig
   import opened Std.Wrappers
 
   // TestFunction whose Apply runs a predicate over the candidate choice
@@ -75,7 +76,7 @@ module MinithesisTest {
     var rng := new SimpleRandomGen(42);
     var tf := new ChoicePredicateTest(pred);
     assume {:axiom} rng !in tf.repr && rng.random !in tf.repr;
-    state := new TestingState<bv64>(rng, tf, 1000, 42, None);
+    state := new TestingState<bv64>(rng, tf, 1000, 42, None, Off, false);
   }
 
   // ============================================================

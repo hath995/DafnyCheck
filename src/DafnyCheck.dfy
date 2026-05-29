@@ -222,10 +222,15 @@ module DafnyCheck {
     // do not participate in `repr` or `Valid()`.
     var classifier: Option<T -> string>
     var stats: map<string, nat>
+    // Reporting controls. At Verbosity.High the engine traces every generated
+    // value + choice sequence and every accepted shrink. Plain value fields, so
+    // they do not participate in `repr` or `Valid()`.
+    var verbosity: Verbosity
+    var useColor: bool
     ghost var repr: set<object>
 
     constructor(random: RandomGen, testFunction: TestFunction<T>, maxExamples: nat, seed: bv64,
-                classifier: Option<T -> string>)
+                classifier: Option<T -> string>, verbosity: Verbosity, useColor: bool)
       requires 0 < maxExamples
       requires testFunction.Valid()
       requires random !in testFunction.repr
@@ -240,6 +245,8 @@ module DafnyCheck {
       this.testFunction := testFunction;
       this.seed := seed;
       this.classifier := classifier;
+      this.verbosity := verbosity;
+      this.useColor := useColor;
       this.stats := map[];
       this.maxExamples := maxExamples*10;
       this.validTestCases := 0;
@@ -373,6 +380,9 @@ module DafnyCheck {
           bestResult := testResult.value;
         }
       }
+      // At High verbosity, trace every generated value and its choice sequence.
+      Reporting.ReportGenerated(testResult.value, testCase.GetChoices(), testResult.IsValid(),
+                                useColor, verbosity);
     }
 
 
@@ -653,8 +663,11 @@ module DafnyCheck {
       // holds.
       assert testCase.repr == {testCase, testCase.random};
       assert testFunction.repr !! testCase.repr;
+      var before := if result.Some? then result.Extract() else attempt;
       var newResult := testFunction.Apply(testCase);
       if newResult.Error().Some? && newResult.Error().Extract() == INTERESTING {
+        // At High verbosity, trace each accepted shrink (old -> new choices).
+        Reporting.ReportShrink(before, attempt, useColor, verbosity);
         result := Some(attempt);
         bestResult := newResult.value;
         res := Some(attempt);
@@ -879,7 +892,7 @@ module DafnyCheck {
     assert fresh(rng) && fresh(rng.random);
     // Fresh PredicateTest cannot alias the freshly-constructed rng or its inner random.
     assume {:axiom} rng !in pt.repr && rng.random !in pt.repr;
-    var state := new TestingState<T>(rng, pt, numRuns, seed, cfg.classifier);
+    var state := new TestingState<T>(rng, pt, numRuns, seed, cfg.classifier, cfg.verbosity, cfg.useColor);
     state.Run();
 
     var res := state.GetResult();
@@ -960,7 +973,7 @@ module DafnyCheck {
     // Fresh MethodTest cannot alias the freshly-constructed rng or its
     // inner random — same discharge as the predicate runner above.
     assume {:axiom} rng !in mt.repr && rng.random !in mt.repr;
-    var state := new TestingState<Input>(rng, mt, numRuns, seed, cfg.classifier);
+    var state := new TestingState<Input>(rng, mt, numRuns, seed, cfg.classifier, cfg.verbosity, cfg.useColor);
     state.Run();
 
     var res := state.GetResult();
