@@ -1,224 +1,164 @@
-# `Stateful.dfy` — model-based testing (module `StatefulTesting`)
+# `Stateful.dfy` — model-based testing (abstract module `StatefulModelTest`)
 
-Stateful / model-based property testing: generate a sequence of `Command`s, drive them against a
-**mutable system under test (SUT)**, project the system into an immutable **model** after every
-command, and check an [LTL temporal property](LTL.md) over the resulting sequence of model states.
-This is the Dafny analogue of [`@fast-check/LTL` (LTLTS)](https://github.com/hath995/LTLTS)'s
-`temporalModelRun`, built on the [`DafnyCheck`](DafnyCheck.md) engine (so it inherits generation,
-shrinking, seeding, and reporting for free).
+Stateful / model-based property testing via **module refinement**. You write a test by `refines`-ing
+the abstract `StatefulModelTest` module: you supply the concrete `Model`, system-under-test `SUT`,
+and command `Cmd` types plus the operations over them, and you inherit the whole runner. The engine
+generates command sequences, drives them against a fresh (possibly mutable, heap) system, samples it
+into an immutable model after each command, and checks an [LTL temporal property](LTL.md) over the
+model trace — all on top of the [`DafnyCheck`](DafnyCheck.md) engine (generation, shrinking, seeding,
+reporting). It is the Dafny analogue of
+[`@fast-check/LTL` (LTLTS)](https://github.com/hath995/LTLTS)'s `temporalModelRun`.
 
-## Intuition
+## Why refinement (and no casts, no test damage)
 
-Three moving parts:
+A *stateful* test drives a **mutable** SUT in place. Mutating a heap object needs a `modifies`
+clause, and `modifies` requires a *reference*. Neither a generic **type parameter** nor an abstract
+**type** is assignable to `object` in Dafny, so `modifies sys` / `sys in repr` are type errors for
+both — you cannot frame a generic SUT's heap directly.
 
-- **System (`System<Model>`)** — the real, **mutable** thing you want to test (usually a heap
-  object with methods). It is created fresh for each test case and mutated *in place* by commands.
-- **Model (`Model`)** — a small, immutable abstraction of the system's *observable* state. The LTL
-  property is written against the model, never against the system directly.
-- **Sample (`System.Sample`)** — the bridge: a method on the system that reads its current state
-  and produces the model you make assertions about.
+Module refinement sidesteps this: in the *refining* module the deferred `type SUT` becomes a
+**concrete class**, so command bodies call its methods directly — **no downcasts**. The only thing
+that must cross the abstract/concrete boundary is the SUT's heap footprint, and that is threaded as
+an explicit ghost `set<object>` (`repr`), which *is* allowed in `modifies`/`reads`. The result:
+
+- the production class stays **completely clean** — it extends nothing and has no testing concepts;
+- commands are a plain **datatype** (no per-command classes, no `repr`/`Valid` boilerplate);
+- the runner (`Apply` loop, `RunModelTest`) is written **once** in the abstract module.
+
+## The abstract module — what you refine
+
+```dafny
+abstract module StatefulModelTest {
+  type Model(!new)            // immutable observation of the system
+  type SUT                    // the system under test (refined to a concrete class)
+  type Cmd(!new)              // the command alphabet (refined to a datatype)
+
+  // The SUT's heap footprint is an explicit ghost set, so the abstract `SUT`
+  // never appears in a reads/modifies clause.
+  ghost predicate ValidSUT(s: SUT, repr: set<object>) reads repr
+  function InitialModel(): Model
+
+  method MakeSUT() returns (s: SUT, ghost repr: set<object>)
+    ensures ValidSUT(s, repr) ensures fresh(repr)
+  method Sample(s: SUT, ghost repr: set<object>) returns (m: Model)
+    requires ValidSUT(s, repr) ensures ValidSUT(s, repr)
+  predicate Check(cmd: Cmd, m: Model)                       // precondition over the model
+  method RunCmd(cmd: Cmd, m: Model, s: SUT, ghost repr: set<object>)
+    returns (ghost repr': set<object>)                      // footprint may grow
+    requires Check(cmd, m) requires ValidSUT(s, repr)
+    modifies repr
+    ensures ValidSUT(s, repr') ensures repr <= repr' ensures fresh(repr' - repr)
+  function CmdString(cmd: Cmd): string                      // label for the failure trace
+
+  // ... inherited runner ...
+  method RunModelTest(name: string, cmds: Arbitrary<Cmd>, ltlProperty: LTLFormula<Model>, maxSteps: nat)
+    returns (passed: bool)
+    requires cmds.Valid() && WellFormedFormula(ltlProperty) && 0 < maxSteps
+  method RunModelTestWithConfig(name, cmds, ltlProperty, maxSteps,
+    numRuns: nat, seed: bv64, useColor: bool, verbosity: Verbosity) returns (passed: bool)
+}
+```
 
 The runner repeats, for each generated command sequence:
 
 ```
-sys := factory.Make()              // fresh, Valid() SUT
-m   := initialModel                // starting model (should equal a Sample() of the fresh system)
-for each generated command cmd, up to maxSteps:
-    if cmd.check(m):               // precondition over the *model*; if false, skip the command
-        cmd.run(m, sys)            // *** mutate the SUT in place ***
-        m := sys.Sample()          // project the mutated system into the next model
-        step the LTL formula on m  // advance the temporal property one state
-    stop early once the formula is determined (True/False)
+s, repr := MakeSUT()                  // fresh SUT + its footprint
+m := InitialModel()
+for each generated cmd, up to maxSteps:
+    if Check(cmd, m):                 // precondition over the model; if false, skip
+        repr := RunCmd(cmd, m, s, repr)   // *** mutate the SUT in place (footprint may grow) ***
+        m := Sample(s, repr)              // project the mutated system into the next model
+        step the LTL formula on m
+    stop early once the formula is determined
 ```
 
-The key idea: **the model is sampled out of the system, not computed by the command.** `run` drives
-the system forward; the *truth* about the new state always comes from `Sample`, so a command can't
-"lie" about its effect to make the property pass. `check(m)` is a precondition — a command whose
-`check` is false for the current model is silently skipped (not a failure), which is how you say
-"this operation is only legal in these states."
-
-## Why `System` is a trait (and the SUT is mutable)
-
-If `run` just returned new data, an ordinary `RunMethodTest` would already suffice — the point of a
-*stateful* test is to drive a **mutable** SUT and watch it evolve. To mutate a value in place a
-method needs a `modifies` clause, and `modifies` requires a *reference*. A generic type parameter
-can't be one (Dafny can't prove a type parameter is a reference type), so `System` is modelled as a
-**trait** — exactly mirroring the `Transformable<T>` trait that `Arbitrary<T>` wraps:
-
-- it owns its heap footprint as `ghost var repr: set<object>`, and
-- carries a `Valid()` invariant with the standard `Valid() ==> this in repr` shape.
-
-A trait instance *is* a reference, so `modifies sys.repr` is legal and a command can mutate the
-system in place. Concrete SUTs `extend System<Model>`, put their mutable state (arrays, cells, …)
-into `repr`, and implement `Sample`.
-
-## The traits
-
-```dafny
-// The mutable system under test. Concrete SUTs extend this.
-trait System<Model(!new)> {
-  ghost var repr: set<object>
-  ghost predicate Valid() reads this, repr ensures Valid() ==> this in repr
-  method Sample() returns (m: Model)          // project current state → model
-    requires Valid() ensures Valid()
-}
-
-// A command drives the system in place.
-trait Command<Model(!new)> {
-  ghost var repr: set<Command<Model>>
-  ghost predicate Valid() reads this, repr ensures Valid() ==> this in repr
-  predicate check(m: Model)                   // precondition over the current model
-  method run(m: Model, sys: System<Model>)
-    requires check(m) requires sys.Valid()
-    modifies sys.repr                          // mutate the SUT in place
-    ensures sys.Valid()
-    ensures fresh(sys.repr - old(sys.repr))    // may grow repr, but only with fresh objects
-  function toString(): string reads this       // label for the failure trace
-}
-
-// Builds a fresh, valid SUT per test case.
-trait SystemFactory<Model(!new)> {
-  method Make() returns (sys: System<Model>)
-    ensures fresh(sys) ensures fresh(sys.repr) ensures sys.Valid()
-}
-```
-
-Notes:
-
-- `run` mutates `sys` in place; it does **not** return a model. A command typically downcasts
-  `sys as ConcreteSUT` in its body to call the SUT's methods. It may grow `sys.repr` (e.g. allocate
-  internal nodes) provided the additions are `fresh` and `Valid()` is restored — that's what the
-  `ensures fresh(sys.repr - old(sys.repr))` clause guarantees, and it's what lets the runner keep
-  modifying the system across steps without listing it in `Apply`'s `modifies` clause (the whole
-  `sys.repr` stays fresh and disjoint from the engine's own state).
-- `Sample` and the SUT operations are *methods* (not `function`s) so they may read/mutate heap
-  freely. Concrete `System`/`Command`/`SystemFactory` classes are annotated
-  `@AssumeCrossModuleTermination` and give their methods `decreases 0`, because the engine calls
-  them across the module boundary.
-
-## Run methods
-
-```dafny
-type PropertyTest<!T> = T -> bool
-
-// Predicate property over a single drawn input — delegates to DafnyCheck.RunTest.
-method RunTest<T(!new)>(test: PropertyTest<T>, arb: Arbitrary<T>, name: string) returns (passed: bool)
-  requires arb.Valid()
-
-// Model-based run: generate command sequences, sample the system after each command,
-// and evaluate `ltlProperty` over the sampled model states. Defaults: 100 runs,
-// seed 42, color on, Low verbosity.
-method RunModelTest<Model(!new)>(
-    name: string,
-    cmds: Arbitrary<Command<Model>>,
-    ltlProperty: LTLFormula<Model>,
-    initialModel: Model,
-    factory: SystemFactory<Model>,
-    maxSteps: nat)
-  returns (passed: bool)
-  requires cmds.Valid() && WellFormedFormula(ltlProperty) && 0 < maxSteps
-
-// As above, but exposes run count, seed, color, and verbosity. (The classifier/examples
-// knobs of RunConfig are not applied to model tests — commands aren't readily classifiable —
-// so they are explicit parameters rather than a RunConfig value.)
-method RunModelTestWithConfig<Model(!new)>(
-    name, cmds, ltlProperty, initialModel, factory, maxSteps,
-    numRuns: nat, seed: bv64, useColor: bool, verbosity: Verbosity)
-  returns (passed: bool)
-```
-
-The runners are generic over `Model` only — `System<Model>` is plugged in by inheritance, just as a
-`Transformable<T>` is plugged into `Arbitrary<T>`. All return `bool` (`true` = the property held on
-every generated run). Build `cmds` with the generators in [`Arbitrary.md`](Arbitrary.md) (e.g.
-`Of([...commands])` or `Mix`), and build `ltlProperty` with the operators in [`LTL.md`](LTL.md).
+The model is **sampled out of the system**, not computed by the command — so a command can't lie
+about its effect. `Check` is a skip-precondition: a command whose `Check` is false in the current
+model is silently skipped (not a failure). `RunCmd` returns the (possibly grown) footprint `repr'`,
+so SUTs that allocate as they run (linked lists, trees, …) are supported; a preallocated/bounded SUT
+just returns `repr` unchanged.
 
 ## Failure reporting
 
-On failure the report prints the **violated LTL tags**, the **command trace**, and the
-**minimised choices** — all from the *minimal* counterexample, not the last thing the shrinker tried:
-
-```dafny
-datatype ModelTestOutcome = ModelTestOutcome(tags: set<string>, commandTrace: seq<string>)
-```
-
-`ModelTestFunction` extends `TestFunction<ModelTestOutcome>`, so each test case returns its tags +
-trace **inside the `TestResult` payload**. `TestingState` tracks that payload as `bestResult` in
-lockstep with the minimised choice sequence, and the runner reads the trace/tags off
-`GetBestResult()`. Tag an atomic property with `.Tag("name")` (see [LTL.md](LTL.md)) to control what
-appears here.
+On failure the report prints the **violated LTL tags**, the **command trace**, and the **minimised
+choices**, all from the *minimal* counterexample. Each test case returns a
+`ModelTestOutcome(tags, commandTrace)` as its `TestResult` payload; `TestingState` tracks that
+payload as `bestResult` in lockstep with the minimised choice sequence, so the trace is never a stale
+shrink probe. Tag atomic properties with `.Tag("name")` (see [LTL.md](LTL.md)).
 
 ## Worked example — a circular (ring-buffer) FIFO queue (`test/StatefulTest.dfy`)
 
-The SUT is a real fixed-capacity ring buffer mutated in place. The model records the current
-contents plus a log of every enqueue and dequeue, and the property asserts FIFO correctness:
+The production class extends nothing; commands are a datatype; `SUT` is refined to the class, so
+`RunCmd` drives it with no casts.
 
 ```dafny
-datatype QueueModel = QueueModel(current: seq<int>, enqueued: seq<int>, dequeued: seq<int>)
+module CircularQueueModelTest refines StatefulModelTest {
+  datatype QueueModel = QueueModel(current: seq<int>, enqueued: seq<int>, dequeued: seq<int>)
+  type Model = QueueModel
+  datatype QueueCmd = Enq(v: nat) | Deq | BuggyDeq
+  type Cmd = QueueCmd
 
-@AssumeCrossModuleTermination
-class CircularQueue extends System<QueueModel> {
-  var data: array<int>            // capacity == data.Length
-  var head: nat                   // index of the front element
-  var count: nat                  // number of live elements
-  var enqLog: seq<int>            // every accepted enqueue, in order
-  var deqLog: seq<int>            // every dequeue, in order
-  // constructor sets repr := {this, data}
+  class CircularQueue {                          // clean: no testing concepts
+    var data: array<int>
+    var head: nat
+    var count: nat
+    var enqLog: seq<int>
+    var deqLog: seq<int>
+    predicate Inv() reads this { data.Length > 0 && head < data.Length && count <= data.Length }
+    method enqueue(v: int) requires Inv() requires count < data.Length
+      modifies this, data ensures Inv() ensures data == old(data) { /* … */ }
+    method dequeue() returns (v: int) requires Inv() requires count > 0
+      modifies this ensures Inv() ensures data == old(data) { /* … */ }
+    // ... contentsFrom(i), dequeueLifo() (the buggy LIFO pop) ...
+  }
+  type SUT = CircularQueue
 
-  ghost predicate Valid() reads this, repr ensures Valid() ==> this in repr {
-    this in repr && data in repr && repr == {this, data}
-    && data.Length > 0 && head < data.Length && count <= data.Length
+  ghost predicate ValidSUT(s: SUT, repr: set<object>) { s in repr && s.data in repr && s.Inv() }
+  function InitialModel(): Model { QueueModel([], [], []) }
+  method MakeSUT() returns (s: SUT, ghost repr: set<object>) { s := new CircularQueue(4); repr := {s, s.data}; }
+  method Sample(s: SUT, ghost repr: set<object>) returns (m: Model) { m := QueueModel(s.contentsFrom(0), s.enqLog, s.deqLog); }
+  predicate Check(cmd: Cmd, m: Model) {
+    match cmd { case Enq(_) => true case Deq => |m.current| > 0 case BuggyDeq => |m.current| > 0 }
   }
-  method Sample() returns (m: QueueModel) requires Valid() ensures Valid() {
-    m := QueueModel(contentsFrom(0), enqLog, deqLog);   // contents in FIFO order
+  method RunCmd(cmd: Cmd, m: Model, s: SUT, ghost repr: set<object>) returns (ghost repr': set<object>) {
+    match cmd {                                  // s IS a CircularQueue — no casts
+      case Enq(v)   => if s.count < s.data.Length { s.enqueue(v); }
+      case Deq      => if s.count > 0 { var _ := s.dequeue(); }
+      case BuggyDeq => if s.count > 0 { var _ := s.dequeueLifo(); }
+    }
+    repr' := repr;                               // preallocated ring buffer: footprint fixed
   }
-  method enqueue(v: int) requires Valid() requires count < data.Length
-    modifies repr ensures Valid() ensures fresh(repr - old(repr)) { /* … */ }
-  method dequeue() returns (v: int) requires Valid() requires count > 0
-    modifies repr ensures Valid() ensures fresh(repr - old(repr)) { /* … */ }
+  function CmdString(cmd: Cmd): string { match cmd { case Enq(v) => "Enq(" + IntToString(v) + ")" case Deq => "Deq" case BuggyDeq => "BuggyDeq" } }
+
+  // FIFO correctness + multiset preservation, over the model
+  function QueueCorrect(): LTLFormula<QueueModel> /* WellFormed */ {
+    Always(And(
+      PredOf((m: QueueModel) => m.enqueued == m.dequeued + m.current).Tag("fifo"),
+      PredOf((m: QueueModel) =>
+        multiset(m.enqueued) == multiset(m.dequeued) + multiset(m.current)).Tag("multiset")), 0)
+  }
+
+  method Main() {
+    var goodCmds := Arbitrary<QueueCmd>.Of([Enq(1), Enq(2), Enq(3), Deq]);
+    var _ := RunModelTest("queue (correct)", goodCmds, QueueCorrect(), 30);
+    var badCmds := Arbitrary<QueueCmd>.Of([Enq(1), Enq(2), Enq(3), BuggyDeq]);
+    var _ := RunModelTest("queue (buggy LIFO)", badCmds, QueueCorrect(), 30);
+  }
 }
 ```
 
-A command downcasts and drives the SUT (note: no boilerplate beyond the cast):
-
-```dafny
-method run(m: QueueModel, sys: System<QueueModel>)
-  requires check(m) requires sys.Valid()
-  modifies sys.repr ensures sys.Valid() ensures fresh(sys.repr - old(sys.repr))
-{
-  if sys is CircularQueue {
-    var q := sys as CircularQueue;
-    if q.count < q.data.Length { q.enqueue(value); }   // defensive guard
-  }
-}
-```
-
-The property — FIFO order **and** multiset preservation — written against the model:
-
-```dafny
-function QueueCorrect(): LTLFormula<QueueModel> /* WellFormed */ {
-  Always(And(
-    PredOf((m: QueueModel) => m.enqueued == m.dequeued + m.current).Tag("fifo"),
-    PredOf((m: QueueModel) =>
-      multiset(m.enqueued) == multiset(m.dequeued) + multiset(m.current)).Tag("multiset")), 0)
-}
-```
-
-`enqueued == dequeued + current` says everything put in (in order) equals everything taken out (in
+`enqueued == dequeued + current` says everything enqueued, in order, equals everything dequeued (in
 order) followed by everything still queued — FIFO correctness, which also implies the multiset of
-inserted items equals dequeued ⊎ remaining.
-
-Driving correct commands passes; swapping in a **buggy LIFO dequeue** (returns the back element)
-fails, and the minimised counterexample isolates the smallest order-violating trace:
+inserted items equals dequeued ⊎ remaining. Correct commands pass; the buggy LIFO dequeue fails:
 
 ```
-[circular queue: FIFO + multiset (correct)] PASS (1000 valid examples)
+[queue (correct)] PASS (1000 valid examples)
 
-[circular queue: FIFO violated by LIFO dequeue] FAIL
+[queue (buggy LIFO)] FAIL
   violated tags: {fifo}
   commands: [Enq(2), Enq(1), BuggyDeq]
   minimised choices: [1, 0, 3]
 ```
 
 Only `fifo` is reported, not `multiset`: a LIFO pop returns the right *items* in the wrong *order*,
-so the multiset invariant still holds — a nice illustration of tags pinpointing *which* property
-broke.
+so the multiset invariant still holds — tags pinpoint *which* property broke.

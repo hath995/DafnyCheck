@@ -2,17 +2,21 @@ include "./Arbitrary.dfy"
 include "./DafnyCheck.dfy"
 include "./LTL.dfy"
 
-// Stateful (model-based) property testing on top of Minithesis's TestingState,
-// using the LTL formula evaluator from LTL.dfy for temporal properties.
+// Stateful (model-based) property testing via *module refinement*.
 //
-// The runner drives a sequence of `Command<Model>` against a fresh, mutable
-// `System<Model>` per test case. After each accepted command it Sample()s the
-// system into an immutable Model and Step-s the LTL formula. It stops when:
-//   - the formula is determined (True/False);
-//   - the max step budget is reached;
-//   - a violation is detected.
-// Violated tags + command trace are reported on failure.
-module StatefulTesting {
+// `StatefulModelTest` is an abstract module declaring the test-specific pieces
+// as deferred types/operations: the immutable `Model`, the (possibly mutable,
+// heap) system `SUT`, the command `Cmd`, and the operations over them. The
+// generic runner (ModelTestFunction + RunModelTest, built on DafnyCheck's
+// TestingState) is fully defined here in terms of those deferred operations.
+//
+// A user `refines` this module, supplying concrete `Model`/`SUT`/`Cmd` and the
+// operation bodies. Because `SUT` becomes a concrete type in the refinement,
+// command bodies touch it directly — *no downcasts* — and because the heap
+// footprint is threaded as an explicit ghost `set<object>`, a mutable heap SUT
+// can be driven in place without ever putting an abstract type in a
+// `modifies`/`reads` clause (which Dafny forbids).
+abstract module StatefulModelTest {
   import opened Arbitrary
   import opened TestResult
   import opened TestTypes
@@ -24,108 +28,70 @@ module StatefulTesting {
   import opened RunConfig
   import Reporting
 
-  // Predicate-based property: takes one input drawn from an Arbitrary<T>.
-  type PropertyTest<!T> = T -> bool
+  // ===========================================================================
+  // The deferred test specification — provided by the refining module.
+  // ===========================================================================
 
-  // Outcome of one model-test case. Carried as the TestResult payload (the
-  // TestFunction's type parameter) rather than stashed in instance fields, so
-  // it rides along with the minimal counterexample that TestingState tracks in
-  // `bestResult` — instead of being overwritten by every later shrink probe.
+  // Immutable abstraction of the system's observable state.
+  type Model(!new)
+  // The system under test. May be a heap class; the refinement decides.
+  type SUT
+  // The command alphabet — typically a datatype the runner draws and matches on.
+  type Cmd(!new)
+
+  // `repr` is the SUT's heap footprint, threaded explicitly as a ghost set so
+  // the abstract type `SUT` never appears in a reads/modifies clause.
+  ghost predicate ValidSUT(s: SUT, repr: set<object>)
+    reads repr
+
+  // The model the trace starts from (should match a Sample of a fresh SUT).
+  function InitialModel(): Model
+
+  // Allocate a fresh SUT and report its footprint.
+  method MakeSUT() returns (s: SUT, ghost repr: set<object>)
+    ensures ValidSUT(s, repr)
+    ensures fresh(repr)
+    decreases 0
+
+  // Project the current system state into a model.
+  method Sample(s: SUT, ghost repr: set<object>) returns (m: Model)
+    requires ValidSUT(s, repr)
+    ensures ValidSUT(s, repr)
+    decreases 0
+
+  // Precondition over the model: a command whose Check is false is skipped.
+  predicate Check(cmd: Cmd, m: Model)
+
+  // Drive one command against the system, mutating it in place. The footprint
+  // may grow (e.g. a command allocates internal nodes): RunCmd returns the
+  // updated `repr'`, which contains `repr` plus only freshly-allocated objects.
+  method RunCmd(cmd: Cmd, m: Model, s: SUT, ghost repr: set<object>)
+    returns (ghost repr': set<object>)
+    requires Check(cmd, m)
+    requires ValidSUT(s, repr)
+    modifies repr
+    ensures ValidSUT(s, repr')
+    ensures repr <= repr'
+    ensures fresh(repr' - repr)
+    decreases 0
+
+  // Label for the failure trace.
+  function CmdString(cmd: Cmd): string
+
+  // ===========================================================================
+  // The generic runner (defined here, inherited by the refinement).
+  // ===========================================================================
+
+  // Outcome of one test case, carried as the TestResult payload so it rides
+  // along with the minimal counterexample TestingState tracks in `bestResult`.
   datatype ModelTestOutcome = ModelTestOutcome(tags: set<string>, commandTrace: seq<string>)
 
-  // The mutable system under test. Mirrors the `Transformable<T>` trait that
-  // `Arbitrary<T>` wraps: it owns its heap footprint `repr` and a `Valid()`
-  // invariant, so commands can mutate it *in place* via `modifies sys.repr`
-  // (a generic type parameter could not appear in a modifies clause; a trait
-  // instance is a reference, so `sys.repr` can). Concrete SUTs extend this,
-  // add their mutable state to `repr`, and implement `Sample` to project the
-  // current state into an immutable Model for the LTL property.
-  trait System<Model(!new)> {
-    ghost var repr: set<object>
-
-    ghost predicate Valid()
-      reads this, repr
-      ensures Valid() ==> this in repr
-
-    method Sample() returns (m: Model)
-      requires Valid()
-      ensures Valid()
-      decreases 0
-  }
-
-  // A command in a model-based test. `check` is the precondition over the
-  // current model state; `run` mutates the system in place; `toString` is for
-  // failure reporting. A command typically downcasts `sys as ConcreteSUT` in
-  // its body to call the SUT's methods. `run` may grow `sys.repr` (e.g. allocate
-  // internal nodes) as long as the additions are fresh and `Valid()` is restored.
-  //
-  // The Model is not produced by `run`; after every accepted command the runner
-  // calls `sys.Sample()` to obtain the next Model, on which the LTL property is
-  // stepped.
-  trait Command<Model(!new)> {
-    ghost var repr: set<Command<Model>>
-
-    ghost predicate Valid()
-      reads this, repr
-      ensures Valid() ==> this in repr
-
-    predicate check(m: Model)
-    method run(m: Model, sys: System<Model>)
-      requires check(m)
-      requires sys.Valid()
-      modifies sys.repr
-      ensures sys.Valid()
-      ensures fresh(sys.repr - old(sys.repr))
-      decreases 0
-    // `reads this` so a command can label itself from its own fields (e.g. the
-    // argument it enqueues); the runner calls this from a method, so the read is
-    // unconstrained at the call site.
-    function toString(): string
-      reads this
-  }
-
-  // Factory that allocates a fresh, valid System under test for each test case
-  // so shrink/replay starts from a clean slate. The returned system and its
-  // whole `repr` must be freshly allocated.
-  trait SystemFactory<Model(!new)> {
-    method Make() returns (sys: System<Model>)
-      ensures fresh(sys)
-      ensures fresh(sys.repr)
-      ensures sys.Valid()
-      decreases 0
-  }
-
-  // Top-level predicate-based RunTest — delegates straight to DafnyCheck.
-  // Returns true iff every generated case passed.
-  method RunTest<T(!new)>(test: PropertyTest<T>, arb: Arbitrary<T>, name: string) returns (passed: bool)
-    requires arb.Valid()
-  {
-    passed := M.RunTest(test, arb, name);
-  }
-
-  // The model-test runner wraps one test case (one execution of a randomly
-  // generated command sequence) as a TestFunction. Many such test cases are
-  // run by the underlying TestingState.
-  //
-  // Per Apply: draw commands one at a time from `cmds`, skip those whose
-  // check(m) is false (the user-selected policy), execute the ones that pass,
-  // Step the LTL formula, stop when determined or out of budget. The violated
-  // tags + command trace are returned in the TestResult's ModelTestOutcome
-  // payload, so the outer runner reads them off `bestResult` (the minimised
-  // counterexample) rather than off mutable instance state.
-  class ModelTestFunction<Model(!new)> extends M.TestFunction<ModelTestOutcome> {
-    var cmds: Arbitrary<Command<Model>>
-    var initialModel: Model
-    var factory: SystemFactory<Model>
+  class ModelTestFunction extends M.TestFunction<ModelTestOutcome> {
+    var cmds: Arbitrary<Cmd>
     var ltlProperty: LTLFormula<Model>
     var maxSteps: nat
 
-    constructor(
-      cmds: Arbitrary<Command<Model>>,
-      initialModel: Model,
-      factory: SystemFactory<Model>,
-      ltlProperty: LTLFormula<Model>,
-      maxSteps: nat)
+    constructor(cmds: Arbitrary<Cmd>, ltlProperty: LTLFormula<Model>, maxSteps: nat)
       requires cmds.Valid()
       requires WellFormedFormula(ltlProperty)
       ensures fresh(this)
@@ -133,8 +99,6 @@ module StatefulTesting {
       ensures Valid()
     {
       this.cmds := cmds;
-      this.initialModel := initialModel;
-      this.factory := factory;
       this.ltlProperty := ltlProperty;
       this.maxSteps := maxSteps;
       this.repr := {this} + {cmds.internalFunction} + cmds.internalFunction.repr;
@@ -153,7 +117,7 @@ module StatefulTesting {
       && WellFormedFormula(ltlProperty)
     }
 
-    method  Apply(tc: TestCase) returns (result: TestResult<ModelTestOutcome>)
+    method Apply(tc: TestCase) returns (result: TestResult<ModelTestOutcome>)
       requires Valid()
       requires tc.Valid()
       requires this.repr !! tc.repr
@@ -164,8 +128,8 @@ module StatefulTesting {
       ensures this.ltlProperty == old(this.ltlProperty)
       decreases this.repr
     {
-      var sys := factory.Make();
-      var m: Model := initialModel;
+      var s, sysRepr := MakeSUT();
+      var m: Model := InitialModel();
       var residual: LTLFormula<Model> := Step(ltlProperty, m);
       var step: nat := 0;
       var commandTrace: seq<string> := [];
@@ -179,30 +143,24 @@ module StatefulTesting {
         invariant this.repr == old(this.repr)
         invariant this.cmds == old(this.cmds)
         invariant this.ltlProperty == old(this.ltlProperty)
-        // `sys` is allocated inside Apply and only ever mutated in place, so its
-        // whole footprint stays fresh and disjoint from tc/this — that is what
-        // lets `cmd.run` modify `sys.repr` without it being in Apply's modifies
-        // clause, and keeps the tc/this invariants stable across the mutation.
-        invariant sys.Valid()
-        invariant fresh(sys.repr)
-        invariant sys.repr !! tc.repr
-        invariant sys.repr !! this.repr
+        // `sysRepr` is allocated inside Apply (by MakeSUT) and only mutated in
+        // place, so it stays fresh and disjoint from tc/this — that is what lets
+        // RunCmd modify it without it being in Apply's modifies clause.
+        invariant ValidSUT(s, sysRepr)
+        invariant fresh(sysRepr)
+        invariant sysRepr !! tc.repr
+        invariant sysRepr !! this.repr
         decreases maxSteps - step
       {
-        // cmds.internalFunction.repr <= this.repr (from Valid()), and
-        // this.repr !! tc.repr (loop invariant) → cmds.internalFunction.repr !! tc.repr.
         assert cmds.internalFunction.repr <= this.repr;
         assert cmds.internalFunction.repr !! tc.repr;
         var cmd := tc.Any(cmds);
-        if cmd.check(m) {
-          // Mutate the System in place, then sample it back into a Model. The
-          // LTL formula is stepped on the sampled Model.
-          cmd.run(m, sys);
-          m := sys.Sample();
-          commandTrace := commandTrace + [cmd.toString()];
-          // After the very first Step, the residual is wrapped in a Next
-          // operator. StepResidual unwraps it and applies the next state in
-          // one shot; plain Step would leave it stuck.
+        if Check(cmd, m) {
+          // Mutate the system in place (footprint may grow with fresh objects),
+          // then sample it back into a model.
+          sysRepr := RunCmd(cmd, m, s, sysRepr);
+          m := Sample(s, sysRepr);
+          commandTrace := commandTrace + [CmdString(cmd)];
           if isGuarded(residual) {
             residual := StepResidual(residual, m);
           } else {
@@ -225,16 +183,10 @@ module StatefulTesting {
     }
   }
 
-  // Top-level stateful runner. Builds the per-test ModelTestFunction, runs
-  // it inside Minithesis's TestingState (so we benefit from generation +
-  // shrink-on-choices), then prints a summary keyed by the user's `name`.
-  // Default-config model test: 100 runs, seed 42, color on, Low verbosity.
-  method RunModelTest<Model(!new)>(
+  method RunModelTest(
     name: string,
-    cmds: Arbitrary<Command<Model>>,
+    cmds: Arbitrary<Cmd>,
     ltlProperty: LTLFormula<Model>,
-    initialModel: Model,
-    factory: SystemFactory<Model>,
     maxSteps: nat)
     returns (passed: bool)
     requires cmds.Valid()
@@ -242,20 +194,13 @@ module StatefulTesting {
     requires 0 < maxSteps
     decreases 0
   {
-    passed := RunModelTestWithConfig(name, cmds, ltlProperty, initialModel, factory, maxSteps,
-                                     100, 42, true, Low);
+    passed := RunModelTestWithConfig(name, cmds, ltlProperty, maxSteps, 100, 42, true, Low);
   }
 
-  // Config-driven model test. Per the v1 scope, model tests honor run count,
-  // seed, color, and verbosity but not the classifier/examples of RunConfig
-  // (commands aren't readily classifiable), so those knobs are explicit params
-  // rather than a RunConfig value.
-  method RunModelTestWithConfig<Model(!new)>(
+  method RunModelTestWithConfig(
     name: string,
-    cmds: Arbitrary<Command<Model>>,
+    cmds: Arbitrary<Cmd>,
     ltlProperty: LTLFormula<Model>,
-    initialModel: Model,
-    factory: SystemFactory<Model>,
     maxSteps: nat,
     numRuns: nat,
     seed: bv64,
@@ -267,7 +212,7 @@ module StatefulTesting {
     requires 0 < maxSteps
     decreases 0
   {
-    var mtf := new ModelTestFunction<Model>(cmds, initialModel, factory, ltlProperty, maxSteps);
+    var mtf := new ModelTestFunction(cmds, ltlProperty, maxSteps);
     var rng := new M.SimpleRandomGen(seed);
     var nr := if numRuns == 0 then 1 else numRuns;
     var state := new M.TestingState<ModelTestOutcome>(rng, mtf, nr, seed, None, verbosity, useColor);
@@ -275,9 +220,6 @@ module StatefulTesting {
 
     var res := state.GetResult();
     var valid := state.GetValidTestCases();
-    // bestResult is tracked in lockstep with the minimised `result` (set in
-    // ApplyTestFunction and Consider), so it carries the violated tags + command
-    // trace of the *minimal* counterexample, not the last shrink probe.
     var best := state.GetBestResult();
     match res {
       case None =>

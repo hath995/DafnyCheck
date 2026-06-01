@@ -17,7 +17,7 @@ Each user-facing source file has a companion `.md` with its API and signatures:
 | `src/DafnyCheck.dfy` | [DafnyCheck.md](src/DafnyCheck.md) | the `RunTest*` / `RunMethodTest*` entry points + engine |
 | `src/Arbitrary.dfy` | [Arbitrary.md](src/Arbitrary.md) | the `Arbitrary<T>` generator catalog, combinators, `Registry` letrec, `Transformable` |
 | `src/RunConfig.dfy` | [RunConfig.md](src/RunConfig.md) | `RunConfig<T>` + `Verbosity` |
-| `src/Stateful.dfy` | [Stateful.md](src/Stateful.md) | model-based testing: `Command`, `RunModelTest` |
+| `src/Stateful.dfy` | [Stateful.md](src/Stateful.md) | model-based testing: abstract `StatefulModelTest` (refine it), `RunModelTest` |
 | `src/LTL.dfy` | [LTL.md](src/LTL.md) | LTL formula operators (`Always`, `Eventually`, `Until`, …) |
 | `src/Reporting.dfy` | [Reporting.md](src/Reporting.md) | colored, verbosity-gated reporting helpers |
 | `src/RandomGenerator.dfy` | [RandomGenerator.md](src/RandomGenerator.md) | the xoroshiro128+ PRNG |
@@ -73,12 +73,15 @@ Wrap a heap-mutating method in a `MethodUnderTest<Input, E>` subclass and drive 
 
 ### Stateful (model-based) tests
 
-Generate sequences of `Command`s, drive them against a fresh **mutable** system per case
-(`System<Model>`, a trait the SUT extends — mutated in place via `modifies sys.repr`), `Sample()`
-the system into a model after each command, and check an LTL property over those model states with
-`RunModelTest`. See [Stateful.md](src/Stateful.md) for the `System`/`Command`/`SystemFactory` traits
-and the sampling flow (with a worked circular-queue FIFO example), and [LTL.md](src/LTL.md) for the
-temporal operators (`Always`, `Eventually`, `Until`, `Release`, `Next`, `And`/`Or`/`Not`/`Implies`, …).
+Write a test by `refines`-ing the abstract `StatefulModelTest` module: supply the concrete `Model`,
+system-under-test `SUT`, and command `Cmd` types plus their operations, and inherit the runner. The
+engine generates command sequences, drives them against a fresh **mutable** system per case,
+`Sample()`s it into a model after each command, and checks an LTL property over those model states
+with `RunModelTest`. Because `SUT` is refined to a concrete class, command bodies drive it with **no
+downcasts**, and the production class stays **clean** (it extends nothing; commands are a plain
+datatype). See [Stateful.md](src/Stateful.md) for the abstract module and a worked circular-queue
+FIFO example, and [LTL.md](src/LTL.md) for the temporal operators (`Always`, `Eventually`, `Until`,
+`Release`, `Next`, `And`/`Or`/`Not`/`Implies`, …).
 
 ## A taste of the generators
 

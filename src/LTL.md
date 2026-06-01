@@ -5,7 +5,7 @@ A linear-temporal-logic formula library used to express temporal properties for
 [`@fast-check/LTL` (LTLTS)](https://github.com/hath995/LTLTS), itself based on the work of Oskar
 Wickström (Quickstrom) and Liam O'Connor. Formulas are values of `LTLFormula<A>` over a state type `A`; build them with the
 constructor functions below (which all establish `WellFormedFormula`), then hand one to
-`StatefulTesting.RunModelTest`.
+`StatefulModelTest.RunModelTest`.
 
 ```dafny
 datatype LTLFormula<!A> =
