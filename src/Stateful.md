@@ -40,7 +40,9 @@ abstract module StatefulModelTest {
 
   method MakeSUT() returns (s: SUT, ghost repr: set<object>)
     ensures ValidSUT(s, repr) ensures fresh(repr)
-  method Sample(s: SUT, ghost repr: set<object>) returns (m: Model)
+  // `prev` (model before this command) and `cmd` let Sample build a *transition*
+  // model — e.g. carry the previous observation + an event for `cmd`.
+  method Sample(prev: Model, cmd: Cmd, s: SUT, ghost repr: set<object>) returns (m: Model)
     requires ValidSUT(s, repr) ensures ValidSUT(s, repr)
   predicate Check(cmd: Cmd, m: Model)                       // precondition over the model
   method RunCmd(cmd: Cmd, m: Model, s: SUT, ghost repr: set<object>)
@@ -65,18 +67,25 @@ The runner repeats, for each generated command sequence:
 s, repr := MakeSUT()                  // fresh SUT + its footprint
 m := InitialModel()
 for each generated cmd, up to maxSteps:
-    if Check(cmd, m):                 // precondition over the model; if false, skip
+    if Check(cmd, m):                     // precondition over the model; if false, skip
         repr := RunCmd(cmd, m, s, repr)   // *** mutate the SUT in place (footprint may grow) ***
-        m := Sample(s, repr)              // project the mutated system into the next model
+        m := Sample(m, cmd, s, repr)      // project the mutated system into the next model
         step the LTL formula on m
     stop early once the formula is determined
 ```
 
 The model is **sampled out of the system**, not computed by the command — so a command can't lie
-about its effect. `Check` is a skip-precondition: a command whose `Check` is false in the current
-model is silently skipped (not a failure). `RunCmd` returns the (possibly grown) footprint `repr'`,
-so SUTs that allocate as they run (linked lists, trees, …) are supported; a preallocated/bounded SUT
-just returns `repr` unchanged.
+about its effect. `Sample` receives the command so the model can carry an **event** for the
+transition that produced it (e.g. `Enqueued(v)` / `Dequeued`). Relational step properties are then
+expressed with LTL's **`Comparison`** operator — `ComparisonOf((p, c) => …)`, where `p` is the
+current state and `c` the next — so the model needs *only* the current observation plus the event;
+it does **not** store the previous observation (the temporal operator supplies it). For example,
+"after an enqueue, `next.current == cur.current + [v]`" is
+`Implies(ReqNext(PredOf(c => c.event.Enqueued?)), ComparisonOf((p, c) => … p.current + [v] == c.current))`.
+None of this requires the SUT to log its own history. `Check` is a skip-precondition: a command
+whose `Check` is false in the current model is silently skipped (not a failure). `RunCmd` returns the
+(possibly grown) footprint `repr'`, so SUTs that allocate as they run (linked lists, trees, …) are
+supported; a preallocated/bounded SUT just returns `repr` unchanged.
 
 ## Failure reporting
 
@@ -88,37 +97,48 @@ shrink probe. Tag atomic properties with `.Tag("name")` (see [LTL.md](LTL.md)).
 
 ## Worked example — a circular (ring-buffer) FIFO queue (`test/StatefulTest.dfy`)
 
-The production class extends nothing; commands are a datatype; `SUT` is refined to the class, so
-`RunCmd` drives it with no casts.
+The production class extends nothing **and stores only the ring buffer** — no enqueue/dequeue logs
+(those would be pure test instrumentation). The model carries only the current contents plus an
+`event`; the LTL **`Comparison`** operator relates each state to the next, so no `previous` field is
+needed. Commands are a datatype, and `SUT` is refined to the class, so `RunCmd` drives it with no
+casts.
 
 ```dafny
 module CircularQueueModelTest refines StatefulModelTest {
-  datatype QueueModel = QueueModel(current: seq<int>, enqueued: seq<int>, dequeued: seq<int>)
+  const CAP: nat := 4
+  datatype Event = Init | Enqueued(v: int) | Dequeued
+  datatype QueueModel = QueueModel(current: seq<int>, event: Event)   // no `previous`
   type Model = QueueModel
   datatype QueueCmd = Enq(v: nat) | Deq | BuggyDeq
   type Cmd = QueueCmd
 
-  class CircularQueue {                          // clean: no testing concepts
+  class CircularQueue {                          // clean: ONLY a ring buffer, no logs
     var data: array<int>
     var head: nat
     var count: nat
-    var enqLog: seq<int>
-    var deqLog: seq<int>
     predicate Inv() reads this { data.Length > 0 && head < data.Length && count <= data.Length }
+    function contentsFrom(i: nat): seq<int> reads this, data requires Inv() requires i <= count { /* … */ }
     method enqueue(v: int) requires Inv() requires count < data.Length
       modifies this, data ensures Inv() ensures data == old(data) { /* … */ }
     method dequeue() returns (v: int) requires Inv() requires count > 0
       modifies this ensures Inv() ensures data == old(data) { /* … */ }
-    // ... contentsFrom(i), dequeueLifo() (the buggy LIFO pop) ...
+    method dequeueLifo() returns (v: int) /* buggy: removes the back */ { /* … */ }
   }
   type SUT = CircularQueue
 
   ghost predicate ValidSUT(s: SUT, repr: set<object>) { s in repr && s.data in repr && s.Inv() }
-  function InitialModel(): Model { QueueModel([], [], []) }
-  method MakeSUT() returns (s: SUT, ghost repr: set<object>) { s := new CircularQueue(4); repr := {s, s.data}; }
-  method Sample(s: SUT, ghost repr: set<object>) returns (m: Model) { m := QueueModel(s.contentsFrom(0), s.enqLog, s.deqLog); }
+  function InitialModel(): Model { QueueModel([], Init) }
+  method MakeSUT() returns (s: SUT, ghost repr: set<object>) { s := new CircularQueue(CAP); repr := {s, s.data}; }
+
+  // Sample carries the freshly-observed contents + an event for `cmd` (no previous).
+  method Sample(prev: Model, cmd: Cmd, s: SUT, ghost repr: set<object>) returns (m: Model) {
+    var cur := s.contentsFrom(0);
+    var ev := match cmd { case Enq(v) => Enqueued(v) case Deq => Dequeued case BuggyDeq => Dequeued };
+    m := QueueModel(cur, ev);
+  }
+  // Capacity-aware, so an accepted command always actually fires.
   predicate Check(cmd: Cmd, m: Model) {
-    match cmd { case Enq(_) => true case Deq => |m.current| > 0 case BuggyDeq => |m.current| > 0 }
+    match cmd { case Enq(_) => |m.current| < CAP case Deq => |m.current| > 0 case BuggyDeq => |m.current| > 0 }
   }
   method RunCmd(cmd: Cmd, m: Model, s: SUT, ghost repr: set<object>) returns (ghost repr': set<object>) {
     match cmd {                                  // s IS a CircularQueue — no casts
@@ -130,35 +150,42 @@ module CircularQueueModelTest refines StatefulModelTest {
   }
   function CmdString(cmd: Cmd): string { match cmd { case Enq(v) => "Enq(" + IntToString(v) + ")" case Deq => "Deq" case BuggyDeq => "BuggyDeq" } }
 
-  // FIFO correctness + multiset preservation, over the model
-  function QueueCorrect(): LTLFormula<QueueModel> /* WellFormed */ {
+  // Each transition is consistent with its event — using Next + Implies + Comparison.
+  // `p` is the current state, `c` the next; no `previous` field is stored.
+  function StepConsistent(): LTLFormula<QueueModel> /* WellFormed */ {
     Always(And(
-      PredOf((m: QueueModel) => m.enqueued == m.dequeued + m.current).Tag("fifo"),
-      PredOf((m: QueueModel) =>
-        multiset(m.enqueued) == multiset(m.dequeued) + multiset(m.current)).Tag("multiset")), 0)
+      Implies(WeakNext(PredOf((c: QueueModel) => c.event.Enqueued?)),
+              ComparisonOf((p: QueueModel, c: QueueModel) =>
+                c.event.Enqueued? ==> c.current == p.current + [c.event.v]).Tag("enqueue-step")),
+      Implies(WeakNext(PredOf((c: QueueModel) => c.event.Dequeued?)),
+              ComparisonOf((p: QueueModel, c: QueueModel) =>
+                c.event.Dequeued? ==> |p.current| > 0 && c.current == p.current[1..]).Tag("dequeue-step"))
+    ), 0)
   }
 
   method Main() {
     var goodCmds := Arbitrary<QueueCmd>.Of([Enq(1), Enq(2), Enq(3), Deq]);
-    var _ := RunModelTest("queue (correct)", goodCmds, QueueCorrect(), 30);
+    var _ := RunModelTest("queue (correct)", goodCmds, StepConsistent(), 30);
     var badCmds := Arbitrary<QueueCmd>.Of([Enq(1), Enq(2), Enq(3), BuggyDeq]);
-    var _ := RunModelTest("queue (buggy LIFO)", badCmds, QueueCorrect(), 30);
+    var _ := RunModelTest("queue (buggy LIFO)", badCmds, StepConsistent(), 30);
   }
 }
 ```
 
-`enqueued == dequeued + current` says everything enqueued, in order, equals everything dequeued (in
-order) followed by everything still queued — FIFO correctness, which also implies the multiset of
-inserted items equals dequeued ⊎ remaining. Correct commands pass; the buggy LIFO dequeue fails:
+Each implication reads: *if the next state's event is this command, then the comparison between the
+current state `p` and the next state `c` holds.* An enqueue must extend the contents by `v`; a
+dequeue must drop the front. The correct queue passes; the buggy LIFO dequeue removes the *back*, so
+after it `c.current != p.current[1..]`:
 
 ```
 [queue (correct)] PASS (1000 valid examples)
 
 [queue (buggy LIFO)] FAIL
-  violated tags: {fifo}
+  violated tags: {dequeue-step}
   commands: [Enq(2), Enq(1), BuggyDeq]
   minimised choices: [1, 0, 3]
 ```
 
-Only `fifo` is reported, not `multiset`: a LIFO pop returns the right *items* in the wrong *order*,
-so the multiset invariant still holds — tags pinpoint *which* property broke.
+The minimal counterexample needs two distinct elements then a buggy dequeue: the prior state `p` has
+`p.current = [2,1]`, the buggy pop yields `c.current = [2]`, but `p.current[1..] = [1]` — the
+`dequeue-step` comparison fails.

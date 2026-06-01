@@ -53,8 +53,12 @@ abstract module StatefulModelTest {
     ensures fresh(repr)
     decreases 0
 
-  // Project the current system state into a model.
-  method Sample(s: SUT, ghost repr: set<object>) returns (m: Model)
+  // Project the current system state into the next model. Receives the previous
+  // model `prev` and the command `cmd` that was just run, so the model can be a
+  // *transition record* — e.g. carry the previous observation plus an event for
+  // `cmd` — letting the LTL property relate consecutive states (current vs.
+  // previous-given-the-command) without the SUT logging its own history.
+  method Sample(prev: Model, cmd: Cmd, s: SUT, ghost repr: set<object>) returns (m: Model)
     requires ValidSUT(s, repr)
     ensures ValidSUT(s, repr)
     decreases 0
@@ -159,7 +163,7 @@ abstract module StatefulModelTest {
           // Mutate the system in place (footprint may grow with fresh objects),
           // then sample it back into a model.
           sysRepr := RunCmd(cmd, m, s, sysRepr);
-          m := Sample(s, sysRepr);
+          m := Sample(m, cmd, s, sysRepr);
           commandTrace := commandTrace + [CmdString(cmd)];
           if isGuarded(residual) {
             residual := StepResidual(residual, m);
