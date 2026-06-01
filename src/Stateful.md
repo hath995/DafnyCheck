@@ -81,7 +81,7 @@ expressed with LTL's **`Comparison`** operator — `ComparisonOf((p, c) => …)`
 current state and `c` the next — so the model needs *only* the current observation plus the event;
 it does **not** store the previous observation (the temporal operator supplies it). For example,
 "after an enqueue, `next.current == cur.current + [v]`" is
-`Implies(ReqNext(PredOf(c => c.event.Enqueued?)), ComparisonOf((p, c) => … p.current + [v] == c.current))`.
+`Implies(WeakNext(PredOf(c => c.event.Enqueued?)), ComparisonOf((p, c) => … p.current + [v] == c.current))`.
 None of this requires the SUT to log its own history. `Check` is a skip-precondition: a command
 whose `Check` is false in the current model is silently skipped (not a failure). `RunCmd` returns the
 (possibly grown) footprint `repr'`, so SUTs that allocate as they run (linked lists, trees, …) are
@@ -106,10 +106,10 @@ casts.
 ```dafny
 module CircularQueueModelTest refines StatefulModelTest {
   const CAP: nat := 4
-  datatype Event = Init | Enqueued(v: int) | Dequeued
-  datatype QueueModel = QueueModel(current: seq<int>, event: Event)   // no `previous`
+  datatype Event = Init | Enqueued(v: int) | Dequeued | Other
+  datatype QueueModel = QueueModel(current: seq<int>, count: nat, expectedCount: nat, event: Event)
   type Model = QueueModel
-  datatype QueueCmd = Enq(v: nat) | Deq | BuggyDeq
+  datatype QueueCmd = Enq(v: nat) | Deq | BuggyDeq | BumpCount
   type Cmd = QueueCmd
 
   class CircularQueue {                          // clean: ONLY a ring buffer, no logs
@@ -118,74 +118,99 @@ module CircularQueueModelTest refines StatefulModelTest {
     var count: nat
     predicate Inv() reads this { data.Length > 0 && head < data.Length && count <= data.Length }
     function contentsFrom(i: nat): seq<int> reads this, data requires Inv() requires i <= count { /* … */ }
-    method enqueue(v: int) requires Inv() requires count < data.Length
-      modifies this, data ensures Inv() ensures data == old(data) { /* … */ }
-    method dequeue() returns (v: int) requires Inv() requires count > 0
-      modifies this ensures Inv() ensures data == old(data) { /* … */ }
+    method enqueue(v: int)        /* … */ { /* … */ }
+    method dequeue() returns (v: int) /* … */ { /* … */ }
     method dequeueLifo() returns (v: int) /* buggy: removes the back */ { /* … */ }
+    method bumpCount()            /* buggy: count++ without adding an element */ { count := count + 1; }
   }
   type SUT = CircularQueue
 
   ghost predicate ValidSUT(s: SUT, repr: set<object>) { s in repr && s.data in repr && s.Inv() }
-  function InitialModel(): Model { QueueModel([], Init) }
+  function InitialModel(): Model { QueueModel([], 0, 0, Init) }
   method MakeSUT() returns (s: SUT, ghost repr: set<object>) { s := new CircularQueue(CAP); repr := {s, s.data}; }
 
-  // Sample carries the freshly-observed contents + an event for `cmd` (no previous).
+  // Sample carries the observed contents, the SUT's count field, an *independently
+  // tracked* expectedCount, and an event for `cmd`.
   method Sample(prev: Model, cmd: Cmd, s: SUT, ghost repr: set<object>) returns (m: Model) {
     var cur := s.contentsFrom(0);
-    var ev := match cmd { case Enq(v) => Enqueued(v) case Deq => Dequeued case BuggyDeq => Dequeued };
-    m := QueueModel(cur, ev);
+    var ev := match cmd { case Enq(v) => Enqueued(v) case Deq => Dequeued case BuggyDeq => Dequeued case BumpCount => Other };
+    var expected := match cmd {
+      case Enq(_)    => prev.expectedCount + 1
+      case Deq       => if prev.expectedCount > 0 then prev.expectedCount - 1 else 0
+      case BuggyDeq  => if prev.expectedCount > 0 then prev.expectedCount - 1 else 0
+      case BumpCount => prev.expectedCount       // a count bump is no logical op
+    };
+    m := QueueModel(cur, s.count, expected, ev);
   }
-  // Capacity-aware, so an accepted command always actually fires.
   predicate Check(cmd: Cmd, m: Model) {
-    match cmd { case Enq(_) => |m.current| < CAP case Deq => |m.current| > 0 case BuggyDeq => |m.current| > 0 }
+    match cmd { case Enq(_) => |m.current| < CAP case Deq => |m.current| > 0
+                case BuggyDeq => |m.current| > 0 case BumpCount => |m.current| < CAP }
   }
   method RunCmd(cmd: Cmd, m: Model, s: SUT, ghost repr: set<object>) returns (ghost repr': set<object>) {
     match cmd {                                  // s IS a CircularQueue — no casts
-      case Enq(v)   => if s.count < s.data.Length { s.enqueue(v); }
-      case Deq      => if s.count > 0 { var _ := s.dequeue(); }
-      case BuggyDeq => if s.count > 0 { var _ := s.dequeueLifo(); }
+      case Enq(v)    => if s.count < s.data.Length { s.enqueue(v); }
+      case Deq       => if s.count > 0 { var _ := s.dequeue(); }
+      case BuggyDeq  => if s.count > 0 { var _ := s.dequeueLifo(); }
+      case BumpCount => if s.count < s.data.Length { s.bumpCount(); }
     }
-    repr' := repr;                               // preallocated ring buffer: footprint fixed
+    repr' := repr;
   }
-  function CmdString(cmd: Cmd): string { match cmd { case Enq(v) => "Enq(" + IntToString(v) + ")" case Deq => "Deq" case BuggyDeq => "BuggyDeq" } }
+  function CmdString(cmd: Cmd): string { /* "Enq(n)" / "Deq" / "BuggyDeq" / "BumpCount" */ }
 
-  // Each transition is consistent with its event — using Next + Implies + Comparison.
-  // `p` is the current state, `c` the next; no `previous` field is stored.
+  // The sub-properties are bare formulas; a single `Always` in QueueProps lifts
+  // the whole bundle over the trace.
+  // (1) transition consistency — Next + Implies + Comparison; `p` is current, `c` next.
   function StepConsistent(): LTLFormula<QueueModel> /* WellFormed */ {
-    Always(And(
+    And(
       Implies(WeakNext(PredOf((c: QueueModel) => c.event.Enqueued?)),
               ComparisonOf((p: QueueModel, c: QueueModel) =>
                 c.event.Enqueued? ==> c.current == p.current + [c.event.v]).Tag("enqueue-step")),
       Implies(WeakNext(PredOf((c: QueueModel) => c.event.Dequeued?)),
               ComparisonOf((p: QueueModel, c: QueueModel) =>
                 c.event.Dequeued? ==> |p.current| > 0 && c.current == p.current[1..]).Tag("dequeue-step"))
-    ), 0)
+    )
+  }
+  // (2) tautological sanity invariant (always holds — sampling forces it).
+  function CountMatches(): LTLFormula<QueueModel> /* WellFormed */ {
+    PredOf((m: QueueModel) => m.count == |m.current|).Tag("count-matches")
+  }
+  // (3) real cross-check: SUT count vs. independently tracked op count.
+  function CountTracksOps(): LTLFormula<QueueModel> /* WellFormed */ {
+    PredOf((m: QueueModel) => m.count == m.expectedCount).Tag("count-tracks-ops")
+  }
+  function QueueProps(): LTLFormula<QueueModel> /* WellFormed */ {
+    Always(AndSeq([StepConsistent(), CountMatches(), CountTracksOps()]), 0)
   }
 
-  method Main() {
-    var goodCmds := Arbitrary<QueueCmd>.Of([Enq(1), Enq(2), Enq(3), Deq]);
-    var _ := RunModelTest("queue (correct)", goodCmds, StepConsistent(), 30);
-    var badCmds := Arbitrary<QueueCmd>.Of([Enq(1), Enq(2), Enq(3), BuggyDeq]);
-    var _ := RunModelTest("queue (buggy LIFO)", badCmds, StepConsistent(), 30);
+  // Pattern: `expect` the outcome of every run — `expect ok` normally, or
+  // `expect !ok` (with a message) when the run is meant to expose a bug.
+  method {:test} QueueModelTest() {
+    var okGood := RunModelTest("queue (correct)", Arbitrary<QueueCmd>.Of([Enq(1), Enq(2), Enq(3), Deq]), QueueProps(), 30);
+    expect okGood, "correct queue should satisfy all properties";
+
+    var okLifo := RunModelTest("queue (buggy LIFO)", Arbitrary<QueueCmd>.Of([Enq(1), Enq(2), Enq(3), BuggyDeq]), QueueProps(), 30);
+    expect !okLifo, "buggy LIFO dequeue should violate step-consistency (dequeue-step)";
+
+    var okBump := RunModelTest("queue (count corruption)", Arbitrary<QueueCmd>.Of([Enq(1), Deq, BumpCount]), QueueProps(), 30);
+    expect !okBump, "BumpCount should desync count from expectedCount (count-tracks-ops)";
   }
 }
 ```
 
-Each implication reads: *if the next state's event is this command, then the comparison between the
-current state `p` and the next state `c` holds.* An enqueue must extend the contents by `v`; a
-dequeue must drop the front. The correct queue passes; the buggy LIFO dequeue removes the *back*, so
-after it `c.current != p.current[1..]`:
+The two count properties are complementary. The **buggy LIFO** dequeue breaks ordering but keeps the
+counts right, so it trips `dequeue-step` only; the **BumpCount** bug desyncs the count field while
+emitting no enqueue/dequeue event, so it trips `count-tracks-ops` only:
 
 ```
-[queue (correct)] PASS (1000 valid examples)
+[queue (correct)]          PASS (1000 valid examples)
 
-[queue (buggy LIFO)] FAIL
-  violated tags: {dequeue-step}
-  commands: [Enq(2), Enq(1), BuggyDeq]
-  minimised choices: [1, 0, 3]
+[queue (buggy LIFO)]       FAIL  violated tags: {dequeue-step}      commands: [Enq(2), Enq(1), BuggyDeq]
+[queue (count corruption)] FAIL  violated tags: {count-tracks-ops}  commands: [BumpCount]
 ```
 
-The minimal counterexample needs two distinct elements then a buggy dequeue: the prior state `p` has
-`p.current = [2,1]`, the buggy pop yields `c.current = [2]`, but `p.current[1..] = [1]` — the
-`dequeue-step` comparison fails.
+Because each run's outcome is checked with `expect` (inverted for the runs meant to fail), the whole
+`{:test}` method passes — that's the pattern to copy when writing your own model tests.
+
+`count == |current|` (`CountMatches`) holds on every run, but note it is in fact guaranteed by the
+sampling — `contentsFrom(0)` returns exactly `count` elements — so it documents the invariant and
+guards against regressions in the observation logic rather than catching a bug here.
