@@ -73,10 +73,12 @@ Wrap a heap-mutating method in a `MethodUnderTest<Input, E>` subclass and drive 
 
 ### Stateful (model-based) tests
 
-Generate sequences of `Command`s, run them against a fresh system per case, and check an LTL
-property over the model states with `RunModelTest`. See [Stateful.md](src/Stateful.md) for the
-`Command`/`SystemFactory` traits and [LTL.md](src/LTL.md) for the temporal operators
-(`Always`, `Eventually`, `Until`, `Release`, `Next`, `And`/`Or`/`Not`/`Implies`, …).
+Generate sequences of `Command`s, drive them against a fresh **mutable** system per case
+(`System<Model>`, a trait the SUT extends — mutated in place via `modifies sys.repr`), `Sample()`
+the system into a model after each command, and check an LTL property over those model states with
+`RunModelTest`. See [Stateful.md](src/Stateful.md) for the `System`/`Command`/`SystemFactory` traits
+and the sampling flow (with a worked circular-queue FIFO example), and [LTL.md](src/LTL.md) for the
+temporal operators (`Always`, `Eventually`, `Until`, `Release`, `Next`, `And`/`Or`/`Not`/`Implies`, …).
 
 ## A taste of the generators
 

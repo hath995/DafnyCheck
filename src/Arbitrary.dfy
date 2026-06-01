@@ -167,7 +167,10 @@ module Arbitrary {
         var rand := this.random.unsafeNext();
         choiceResult := randomFunc(rand);
       }
-      if (choiceResult > n) {
+      // Valid choices index 0..n-1 (the random path uses rand % n, and callers
+      // like OfTransformable index args[choice] with n == |args|). A replayed
+      // prefix choice equal to n must therefore be rejected, not just one > n.
+      if (choiceResult >= n) {
         result := new TestResult<bv64>(Some(INVALID), None);
         return;
       }
