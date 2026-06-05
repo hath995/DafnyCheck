@@ -17,16 +17,47 @@ include "./insertionSort.dfy"
 // sorts bitonic sequences) are built by SORTING a random list and ROTATING it,
 // via `Map` — a rotation of a sorted run is exactly the bitonic shape.
 //
-// Since the algorithm is verified, the property runs are expected to PASS; they
-// serve as a live demonstration and a regression guard. One run is *expected to
-// fail* — feeding `bitonicMerge` arbitrary (non-bitonic) inputs — to show the
-// tool finding a counterexample (and why the bitonic precondition matters).
+// Each property is run under several fixed RNG SEEDS (see `SEEDS`) so the runs
+// are reproducible yet explore different input streams. Since the algorithm is
+// verified, the property runs PASS under every seed (a live demo + regression
+// guard); one run is *expected to fail under every seed* — feeding bitonicMerge
+// arbitrary (non-bitonic) inputs — to show the tool finding a counterexample.
 // ============================================================================
 module BitonicSortCaseStudy {
   import opened DafnyCheck
   import opened Arbitrary
+  import opened RunConfig
   import opened BitonicSort
   import opened InsertionSort
+  import opened LTLUtils
+  import opened Std.Wrappers
+
+  // A handful of fixed seeds — reproducible, but each drives a different stream
+  // of generated inputs.
+  const SEEDS: seq<bv64> := [1, 42, 1337, 271828, 8675309]
+
+  // Run `pred` over `arb` once per seed. Returns whether ALL seeds passed and
+  // whether ANY seed passed (the latter lets a negative test assert that *every*
+  // seed found a counterexample).
+  method RunSeeds(pred: seq<int> -> bool, arb: Arbitrary<seq<int>>, name: string)
+    returns (allOk: bool, anyOk: bool)
+    requires arb.Valid()
+  {
+    allOk := true;
+    anyOk := false;
+    var i := 0;
+    while i < |SEEDS|
+      invariant 0 <= i <= |SEEDS|
+      invariant arb.Valid()           // RunTestWithConfig modifies nothing pre-existing
+    {
+      var cfg := DefaultConfig<seq<int>>().(seed := Some(SEEDS[i]));
+      var nm := name + " [seed=" + IntToString(SEEDS[i] as int) + "]";
+      var ok := RunTestWithConfig(pred, arb, nm, cfg);
+      allOk := allOk && ok;
+      anyOk := anyOk || ok;
+      i := i + 1;
+    }
+  }
 
   // ---- bridge: a compiled power-of-two test, proven to imply the ghost one ----
   lemma NatPowDouble(k: nat)
@@ -108,31 +139,31 @@ module BitonicSortCaseStudy {
 
   // ========================================================================
   // Property tests on the full sort. All are postconditions of bitonicSort,
-  // so they PASS — a regression guard and a live demo.
+  // so they PASS under every seed — a regression guard and a live demo.
   // ========================================================================
 
   method {:test} TestSortsAscendingFixed8()
   {
     var arb := FixedLenLists(8);
     var pred := (s: seq<int>) => (|s| == 0 || IsPow2(|s|)) ==> sortedAsc(bitonicSort(s));
-    var ok := RunTest(pred, arb, "bitonicSort sorts ascending (n=8)");
-    expect ok, "bitonicSort output should be sorted ascending";
+    var allOk, _ := RunSeeds(pred, arb, "bitonicSort sorts ascending (n=8)");
+    expect allOk, "bitonicSort output should be sorted ascending under every seed";
   }
 
   method {:test} TestPreservesMultisetFixed8()
   {
     var arb := FixedLenLists(8);
     var pred := (s: seq<int>) => (|s| == 0 || IsPow2(|s|)) ==> multiset(bitonicSort(s)) == multiset(s);
-    var ok := RunTest(pred, arb, "bitonicSort preserves multiset (n=8)");
-    expect ok, "bitonicSort should be a permutation of its input";
+    var allOk, _ := RunSeeds(pred, arb, "bitonicSort preserves multiset (n=8)");
+    expect allOk, "bitonicSort should be a permutation of its input under every seed";
   }
 
   method {:test} TestSortsAscendingMixedLengths()
   {
     var arb := Pow2LenLists();          // lengths 1..32 via FlatMap
     var pred := (s: seq<int>) => (|s| == 0 || IsPow2(|s|)) ==> sortedAsc(bitonicSort(s));
-    var ok := RunTest(pred, arb, "bitonicSort sorts ascending (mixed 2^k lengths)");
-    expect ok, "bitonicSort output should be sorted ascending at every power-of-two length";
+    var allOk, _ := RunSeeds(pred, arb, "bitonicSort sorts ascending (mixed 2^k lengths)");
+    expect allOk, "bitonicSort output should be sorted at every power-of-two length, under every seed";
   }
 
   // Differential test: agrees with an independent reference sort (insertion sort).
@@ -140,8 +171,8 @@ module BitonicSortCaseStudy {
   {
     var arb := FixedLenLists(8);
     var pred := (s: seq<int>) => (|s| == 0 || IsPow2(|s|)) ==> bitonicSort(s) == isort(s);
-    var ok := RunTest(pred, arb, "bitonicSort == insertionSort (n=8)");
-    expect ok, "bitonicSort and the reference insertion sort should produce the same output";
+    var allOk, _ := RunSeeds(pred, arb, "bitonicSort == insertionSort (n=8)");
+    expect allOk, "bitonicSort and the reference insertion sort should agree under every seed";
   }
 
   // ========================================================================
@@ -153,28 +184,28 @@ module BitonicSortCaseStudy {
     var raw := FixedLenLists(8);
     var bitonicArb := raw.Map((s: seq<int>) => MakeBitonic(s));   // sort, then rotate
     var pred := (b: seq<int>) => (|b| == 0 || IsPow2(|b|)) ==> sortedAsc(bitonicMerge(b));
-    var ok := RunTest(pred, bitonicArb, "bitonicMerge sorts bitonic inputs (n=8)");
-    expect ok, "bitonicMerge should sort a bitonic (sorted-then-rotated) sequence";
+    var allOk, _ := RunSeeds(pred, bitonicArb, "bitonicMerge sorts bitonic inputs (n=8)");
+    expect allOk, "bitonicMerge should sort a bitonic (sorted-then-rotated) sequence under every seed";
   }
 
   method {:test} TestMergePreservesMultiset()
   {
     var arb := FixedLenLists(8);        // multiset preservation holds for ANY input
     var pred := (s: seq<int>) => (|s| == 0 || IsPow2(|s|)) ==> multiset(bitonicMerge(s)) == multiset(s);
-    var ok := RunTest(pred, arb, "bitonicMerge preserves multiset (n=8)");
-    expect ok, "bitonicMerge should be a permutation of its input";
+    var allOk, _ := RunSeeds(pred, arb, "bitonicMerge preserves multiset (n=8)");
+    expect allOk, "bitonicMerge should be a permutation of its input under every seed";
   }
 
   // ========================================================================
   // Negative demo: bitonicMerge does NOT sort arbitrary (non-bitonic) inputs.
-  // Expected to FAIL — the tool should find a small counterexample.
+  // Expected to FAIL under EVERY seed — each should find a small counterexample.
   // ========================================================================
 
   method {:test} TestMergeDoesNotSortArbitrary()
   {
     var arb := FixedLenLists(4);        // length 4 — non-bitonic inputs exist (e.g. [1,0,1,0])
     var pred := (s: seq<int>) => (|s| == 0 || IsPow2(|s|)) ==> sortedAsc(bitonicMerge(s));
-    var ok := RunTest(pred, arb, "bitonicMerge sorts ARBITRARY inputs (expected FAIL)");
-    expect !ok, "bitonicMerge should NOT sort non-bitonic inputs — a counterexample is expected";
+    var _, anyOk := RunSeeds(pred, arb, "bitonicMerge sorts ARBITRARY inputs (expected FAIL)");
+    expect !anyOk, "bitonicMerge should NOT sort non-bitonic inputs — every seed should find a counterexample";
   }
 }

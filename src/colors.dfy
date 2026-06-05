@@ -96,7 +96,8 @@ module ConsoleColors {
             combineColors(fgCode, bgCode)
         }
 
-        method {:test} TestColors() {
+        // @Test
+        method TestColors() {
             print "=== Foreground Colors (Bright/Bold) ===\n";
             print BLACK, "BLACK", NOCOLOR, "  ";
             print RED, "RED", NOCOLOR, "  ";
