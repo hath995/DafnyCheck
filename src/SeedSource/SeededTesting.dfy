@@ -55,4 +55,49 @@ module SeededTesting {
     }
     passed := RunTestWithConfig(pred, arb, name, cfg');
   }
+
+  // ──────────────────────────────────────────────────────────────────────────
+  // Seeded *method*-test runners — siblings of the predicate runners above, for
+  // testing heap-mutating methods wrapped in a MethodUnderTest. Each draws a
+  // fresh seed from SeedSource.GetSeed() and delegates to RunMethodTestWithConfig.
+  // ──────────────────────────────────────────────────────────────────────────
+
+  // Like RunMethodTest, but draws a fresh random seed for this run.
+  method RunMethodTestRandom<Input(!new), E(==)>(arb: Arbitrary<Input>, sut: MethodUnderTest<Input, E>, name: string)
+    returns (passed: bool)
+    requires arb.Valid()
+    requires sut.Valid()
+  {
+    var seed := GetSeed();
+    passed := RunMethodTestWithConfig(arb, sut, name, DefaultConfig<Input>().(seed := Some(seed)));
+  }
+
+  // Like RunMethodTestWithExamples, but with a fresh random seed.
+  method RunMethodTestRandomWithExamples<Input(!new), E(==)>(
+      arb: Arbitrary<Input>, sut: MethodUnderTest<Input, E>, name: string, examples: nat)
+    returns (passed: bool)
+    requires arb.Valid()
+    requires sut.Valid()
+    requires 0 < examples
+  {
+    var seed := GetSeed();
+    passed := RunMethodTestWithConfig(arb, sut, name,
+                                      DefaultConfig<Input>().(seed := Some(seed), numRuns := examples));
+  }
+
+  // Like RunMethodTestWithConfig, but if the config leaves the seed unset (None),
+  // fill it with a fresh random seed; an explicit seed is respected (reproducible).
+  method RunMethodTestRandomWithConfig<Input(!new), E(==)>(
+      arb: Arbitrary<Input>, sut: MethodUnderTest<Input, E>, name: string, cfg: RunConfig<Input>)
+    returns (passed: bool)
+    requires arb.Valid()
+    requires sut.Valid()
+  {
+    var cfg' := cfg;
+    if cfg.seed.None? {
+      var seed := GetSeed();
+      cfg' := cfg.(seed := Some(seed));
+    }
+    passed := RunMethodTestWithConfig(arb, sut, name, cfg');
+  }
 }
