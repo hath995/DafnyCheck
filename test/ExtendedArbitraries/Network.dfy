@@ -2,7 +2,7 @@ include "../../src/ExtendedArbitraries/Network.dfy"
 include "../../src/RandomGenerator.dfy"
 
 module ExtNetworkTest {
-  import opened Arbitrary
+  import opened Arbitraries
   import opened RandomGenerator
   import opened ExtNetwork
 

@@ -4,7 +4,7 @@ include "../Arbitrary.dfy"
 // shapes only — they do not enforce the full RFC grammars (no length caps,
 // quoting, IDN, etc.) — which is sufficient for generating test inputs.
 module ExtWeb {
-  import opened Arbitrary
+  import opened Arbitraries
 
   const ALNUM: seq<char> :=
     ['a','b','c','d','e','f','g','h','i','j','k','l','m','n','o','p','q','r','s','t','u','v','w','x','y','z',

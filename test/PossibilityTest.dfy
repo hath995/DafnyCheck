@@ -2,7 +2,7 @@ include "../src/Arbitrary.dfy"
 include "../src/RandomGenerator.dfy"
 
 module PossibilityTest {
-    import opened Arbitrary
+    import opened Arbitraries
     import opened RandomGenerator
     import opened Std.Strings
 

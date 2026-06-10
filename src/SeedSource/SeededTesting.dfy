@@ -17,8 +17,8 @@ include "./SeedSource.dfy"
 // ============================================================================
 module SeededTesting {
   import opened DafnyCheck
-  import opened Arbitrary
-  import opened RunConfig
+  import opened Arbitraries
+  import opened RunConfigs
   import opened Std.Wrappers
   import opened SeedSource
 

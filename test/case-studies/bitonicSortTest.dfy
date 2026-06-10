@@ -25,8 +25,8 @@ include "./insertionSort.dfy"
 // ============================================================================
 module BitonicSortCaseStudy {
   import opened DafnyCheck
-  import opened Arbitrary
-  import opened RunConfig
+  import opened Arbitraries
+  import opened RunConfigs
   import opened BitonicSort
   import opened InsertionSort
   import opened LTLUtils

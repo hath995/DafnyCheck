@@ -1,4 +1,4 @@
-module RunConfig {
+module RunConfigs {
   import opened Std.Wrappers
 
   // Verbosity levels for test run reporting.

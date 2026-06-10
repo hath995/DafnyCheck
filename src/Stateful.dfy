@@ -17,15 +17,15 @@ include "./LTL.dfy"
 // can be driven in place without ever putting an abstract type in a
 // `modifies`/`reads` clause (which Dafny forbids).
 abstract module StatefulModelTest {
-  import opened Arbitrary
-  import opened TestResult
+  import opened Arbitraries
+  import opened TestResults
   import opened TestTypes
   import opened RandomGenerator
   import opened Std.Wrappers
   import M = DafnyCheck
   import opened LTL
   import opened LTLUtils
-  import opened RunConfig
+  import opened RunConfigs
   import Reporting
 
   // ===========================================================================

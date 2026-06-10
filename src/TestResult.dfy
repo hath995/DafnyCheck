@@ -1,5 +1,5 @@
 include "./TestStatus.dfy"
-module TestResult {
+module TestResults {
   import opened TestTypes
   import opened Std.Wrappers
 

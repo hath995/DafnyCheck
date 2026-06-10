@@ -5,12 +5,12 @@ include "./TestResult.dfy"
 include "./RunConfig.dfy"
 include "./Reporting.dfy"
 module DafnyCheck {
-  import opened TestResult
+  import opened TestResults
   import opened TestTypes
-  import opened Arbitrary
+  import opened Arbitraries
   import opened RandomGenerator
   import opened Std.Wrappers
-  import opened RunConfig
+  import opened RunConfigs
   import Reporting
 
   // A TestFunction is a side-effecting wrapper around the user's test body.
@@ -173,7 +173,7 @@ module DafnyCheck {
   trait RandomGen {
     var random: XoroShift128Plus
 
-    method PostTest(choices: seq<bv64>)
+    method PostTest(choices: seq<Choice>)
       modifies this
 
     method PostTestSuite()
@@ -190,7 +190,7 @@ module DafnyCheck {
       this.random := foo;
     }
 
-    method PostTest(choices: seq<bv64>)
+    method PostTest(choices: seq<Choice>)
       modifies this
     {
       // Simple implementation - in real version would track coverage
@@ -212,10 +212,9 @@ module DafnyCheck {
     var maxExamples: nat
     var validTestCases: nat
     var calls: nat
-    var result: Option<seq<bv64>>
+    var result: Option<seq<Choice>>
     var bestResult: Option<T>
     var bestScoring: Option<object>
-    var testIsTrivial: bool
     var seed: bv64
     // Optional classifier and the distribution it accumulates over generated
     // inputs. Both are plain value/function fields (not heap objects), so they
@@ -254,7 +253,6 @@ module DafnyCheck {
       this.result := None;
       this.bestResult := None;
       this.bestScoring := None;
-      this.testIsTrivial := false;
       this.repr := {this, random, random.random} + testFunction.repr;
     }
 
@@ -270,7 +268,7 @@ module DafnyCheck {
       this.repr == {this, random, random.random} + testFunction.repr
     }
 
-    method GetResult() returns (res: Option<seq<bv64>>)
+    method GetResult() returns (res: Option<seq<Choice>>)
     {
       res := this.result;
     }
@@ -330,7 +328,6 @@ module DafnyCheck {
     function ShouldKeepGenerating(): bool
       reads this
     {
-      !testIsTrivial && 
       result.None? && 
       validTestCases < maxExamples && 
       calls < maxExamples
@@ -359,9 +356,6 @@ module DafnyCheck {
       // the trait boundary, so we assert it explicitly as an axiom.
       assume {:axiom} this.random.random == old(this.random.random);
       calls := calls + 1;
-      if |testCase.GetChoices()| == 0 && testResult.IsValid() {
-        testIsTrivial := true;
-      }
       if testResult.IsValid() {
         validTestCases := validTestCases + 1;
         if testCase.GetTargetingScore() > 0 {
@@ -415,7 +409,7 @@ module DafnyCheck {
       if result.None? {
         return;
       }
-      var previous: Option<seq<bv64>> := None;
+      var previous: Option<seq<Choice>> := None;
       var round: nat := 0;
       while result != previous && round < shrinkRounds
         invariant Valid()
@@ -478,7 +472,7 @@ module DafnyCheck {
             continue;
           }
           // Build attempt = rs[0..i] ++ rs[i+k..]
-          var attempt: seq<bv64>;
+          var attempt: seq<Choice>;
           if i + k <= |rs| {
             attempt := rs[..i] + rs[i + k..];
           } else {
@@ -548,13 +542,13 @@ module DafnyCheck {
             i := i - 1;
             continue;
           }
-          var values: map<nat, bv64> := map[];
+          var values: map<nat, Choice> := map[];
           var j: int := 0;
           while j < k
             invariant 0 <= j <= k
             decreases k - j
           {
-            values := values[(i + j) as nat := 0 as bv64];
+            values := values[(i + j) as nat := 0 as Choice];
             j := j + 1;
           }
           var replacement := ReplaceMultiple(values);
@@ -644,7 +638,7 @@ module DafnyCheck {
       }
     }
 
-    method Consider(attempt: seq<bv64>) returns (res: Option<seq<bv64>>)
+    method Consider(attempt: seq<Choice>) returns (res: Option<seq<Choice>>)
       requires Valid()
       requires 0 < |attempt|
       modifies this`result, this`bestResult, testFunction
@@ -679,7 +673,7 @@ module DafnyCheck {
     // Binary search down to find the smallest value at result[index] that
     // still keeps the test INTERESTING. Java reference: TestingState.java:154-159
     // (the per-index closure passed to binSearchDown).
-    method BinSearchDownHelper(index: nat, high: bv64)
+    method BinSearchDownHelper(index: nat, high: Choice)
       requires Valid()
       requires result.Some?
       modifies this`result, this`bestResult, testFunction
@@ -697,7 +691,7 @@ module DafnyCheck {
       }
       var lo: int := 0;
       var hi: int := high as int;
-      var r0 := ReplaceSingle(index, 0 as bv64);
+      var r0 := ReplaceSingle(index, 0 as Choice);
       if r0.Some? {
         return;
       }
@@ -713,7 +707,7 @@ module DafnyCheck {
         decreases hi - lo
       {
         var mid := lo + (hi - lo) / 2;
-        var rmid := ReplaceSingle(index, mid as bv64);
+        var rmid := ReplaceSingle(index, mid as Choice);
         if rmid.Some? {
           hi := mid;
         } else {
@@ -724,7 +718,7 @@ module DafnyCheck {
 
     // Two-index binary search: shrink result[i] while preserving the sum
     // result[i] + result[j]. Java reference: TestingState.java:169-175.
-    method BinSearchDownHelper2(i: nat, j: nat, jPrev: bv64, high: bv64)
+    method BinSearchDownHelper2(i: nat, j: nat, jPrev: Choice, high: Choice)
       requires Valid()
       requires result.Some?
       modifies this`result, this`bestResult, testFunction
@@ -742,9 +736,11 @@ module DafnyCheck {
       }
       var lo: int := 0;
       var hi: int := high as int;
-      // Initial try at v == 0: jPrev + high. bv64 addition wraps modulo 2^64;
-      // that is the same arithmetic the Java reference performs on int.
-      var r0 := ReplaceMultiple(map[i := 0 as bv64, j := jPrev + high]);
+      // Initial try at v == 0: jPrev + high. Choices are uint32; do the add in int
+      // and reduce mod 2^32 so it wraps (the shrinker is a cold path, so int
+      // arithmetic here costs nothing) — same intent as the Java reference.
+      var jh: Choice := ((jPrev as int + high as int) % 0x1_0000_0000) as Choice;
+      var r0 := ReplaceMultiple(map[i := 0 as Choice, j := jh]);
       if r0.Some? {
         return;
       }
@@ -760,8 +756,10 @@ module DafnyCheck {
         decreases hi - lo
       {
         var mid := lo + (hi - lo) / 2;
-        var delta: bv64 := (high as int - mid) as bv64;
-        var rmid := ReplaceMultiple(map[i := mid as bv64, j := jPrev + delta]);
+        // 0 <= mid <= hi <= high, so high - mid is in [0, 2^32): fits a Choice.
+        var delta: int := high as int - mid;
+        var jd: Choice := ((jPrev as int + delta) % 0x1_0000_0000) as Choice;
+        var rmid := ReplaceMultiple(map[i := mid as Choice, j := jd]);
         if rmid.Some? {
           hi := mid;
         } else {
@@ -770,7 +768,7 @@ module DafnyCheck {
       }
     }
 
-    method ReplaceSingle(index: nat, value: bv64) returns (res: Option<seq<bv64>>)
+    method ReplaceSingle(index: nat, value: Choice) returns (res: Option<seq<Choice>>)
       requires Valid()
       requires result.Some?
       modifies this`result, this`bestResult, testFunction
@@ -791,7 +789,7 @@ module DafnyCheck {
       res := Consider(attempt);
     }
 
-    method ReplaceMultiple(values: map<nat, bv64>) returns (res: Option<seq<bv64>>)
+    method ReplaceMultiple(values: map<nat, Choice>) returns (res: Option<seq<Choice>>)
       requires Valid()
       requires result.Some?
       modifies this`result, this`bestResult, testFunction
@@ -823,7 +821,7 @@ module DafnyCheck {
       res := Consider(attempt);
     }
 
-    function CompareChoices(choices1: seq<bv64>, choices2: seq<bv64>): int
+    function CompareChoices(choices1: seq<Choice>, choices2: seq<Choice>): int
     {
       if |choices1| < |choices2| then
         -1
@@ -833,7 +831,7 @@ module DafnyCheck {
         CompareChoicesHelper(choices1, choices2, 0)
     }
 
-    function CompareChoicesHelper(choices1: seq<bv64>, choices2: seq<bv64>, i: nat): int
+    function CompareChoicesHelper(choices1: seq<Choice>, choices2: seq<Choice>, i: nat): int
       requires |choices1| == |choices2|
       requires i <= |choices1| && i <= |choices2|
       decreases |choices1| - i
@@ -950,7 +948,23 @@ module DafnyCheck {
       returns (passed: bool)
     requires arb.Valid() requires sut.Valid()
   {
+    var ce;
+    passed, ce := RunMethodTestWithConfigCE(arb, sut, name, cfg);
+  }
+
+  // Like RunMethodTestWithConfig but also returns the minimised counterexample
+  // VALUE (the shrunk failing input), so callers can assert shrink quality.
+  // `passed` and all reporting are identical to RunMethodTestWithConfig.
+  method RunMethodTestWithConfigCE<Input(!new), E(==)>(
+      arb: Arbitrary<Input>,
+      sut: MethodUnderTest<Input, E>,
+      name: string,
+      cfg: RunConfig<Input>)
+      returns (passed: bool, counterexample: Option<Input>)
+    requires arb.Valid() requires sut.Valid()
+  {
     passed := true;
+    counterexample := None;
     // Always-test examples by running the SUT directly on each.
     var i := 0;
     while i < |cfg.examples|
@@ -993,6 +1007,7 @@ module DafnyCheck {
         }
       case Some(choices) =>
         passed := false;
+        counterexample := best;
         Reporting.ReportFailure(name, cfg.useColor, cfg.verbosity);
         match best {
           case Some(v) => Reporting.ReportCounterExample(v, choices, cfg.useColor, cfg.verbosity);

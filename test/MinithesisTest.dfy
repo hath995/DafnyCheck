@@ -14,11 +14,11 @@ include "../src/TestResult.dfy"
 
 module MinithesisTest {
   import opened DafnyCheck
-  import opened Arbitrary
+  import opened Arbitraries
   import opened RandomGenerator
-  import opened TestResult
+  import opened TestResults
   import opened TestTypes
-  import opened RunConfig
+  import opened RunConfigs
   import opened Std.Wrappers
 
   // TestFunction whose Apply runs a predicate over the candidate choice
@@ -26,10 +26,10 @@ module MinithesisTest {
   // builds TestCases via TestCase.ForChoices, so the candidate appears as
   // the prefix. Cannot be used during Generate (prefix is always [] then).
   @AssumeCrossModuleTermination
-  class ChoicePredicateTest extends TestFunction<bv64> {
-    var pred: seq<bv64> -> bool
+  class ChoicePredicateTest extends TestFunction<Choice> {
+    var pred: seq<Choice> -> bool
 
-    constructor(pred: seq<bv64> -> bool)
+    constructor(pred: seq<Choice> -> bool)
       ensures fresh(this)
       ensures this.pred == pred
       ensures this.repr == {this}
@@ -46,7 +46,7 @@ module MinithesisTest {
       this in repr && repr == {this}
     }
 
-    method Apply(tc: TestCase) returns (result: TestResult<bv64>)
+    method Apply(tc: TestCase) returns (result: TestResult<Choice>)
       requires Valid()
       requires tc.Valid()
       requires this.repr !! tc.repr
@@ -55,9 +55,9 @@ module MinithesisTest {
       decreases this.repr
     {
       if pred(tc.prefix) {
-        result := new TestResult<bv64>(Some(INTERESTING), Some(0 as bv64));
+        result := new TestResult<Choice>(Some(INTERESTING), Some(0 as Choice));
       } else {
-        result := new TestResult<bv64>(None, Some(0 as bv64));
+        result := new TestResult<Choice>(None, Some(0 as Choice));
       }
     }
   }
@@ -66,7 +66,7 @@ module MinithesisTest {
   // We surface the rng + rng.random freshness in ensures so callers can
   // discharge the modifies clauses on shrink methods (which write through
   // state.random and state.random.random).
-  method NewState(pred: seq<bv64> -> bool) returns (state: TestingState<bv64>)
+  method NewState(pred: seq<Choice> -> bool) returns (state: TestingState<Choice>)
     ensures fresh(state)
     ensures fresh(state.random)
     ensures fresh(state.random.random)
@@ -76,7 +76,7 @@ module MinithesisTest {
     var rng := new SimpleRandomGen(42);
     var tf := new ChoicePredicateTest(pred);
     assume {:axiom} rng !in tf.repr && rng.random !in tf.repr;
-    state := new TestingState<bv64>(rng, tf, 1000, 42, None, Off, false);
+    state := new TestingState<Choice>(rng, tf, 1000, 42, None, Off, false);
   }
 
   // ============================================================
@@ -88,34 +88,34 @@ module MinithesisTest {
   method {:test} TestConsiderAcceptsShorter()
   {
     // Predicate: any sequence starting with 3 is INTERESTING.
-    var pred := (cs: seq<bv64>) => |cs| >= 1 && cs[0] == 3;
+    var pred := (cs: seq<Choice>) => |cs| >= 1 && cs[0] == 3;
     var state := NewState(pred);
-    state.result := Some([3 as bv64, 9, 9, 9]);
+    state.result := Some([3 as Choice, 9, 9, 9]);
     print "\n[Consider shorter] before: ", state.result, "\n";
-    var res := state.Consider([3 as bv64]);
+    var res := state.Consider([3 as Choice]);
     print "[Consider shorter] after:  ", state.result, " (returned ", res, ")\n";
     expect res.Some?;
-    expect state.result == Some([3 as bv64]);
+    expect state.result == Some([3 as Choice]);
   }
 
   method {:test} TestConsiderRejectsNonInteresting()
   {
-    var pred := (cs: seq<bv64>) => |cs| >= 1 && cs[0] == 7;
+    var pred := (cs: seq<Choice>) => |cs| >= 1 && cs[0] == 7;
     var state := NewState(pred);
-    state.result := Some([7 as bv64, 9, 9]);
+    state.result := Some([7 as Choice, 9, 9]);
     print "\n[Consider reject] before: ", state.result, "\n";
-    var res := state.Consider([2 as bv64, 2]);
+    var res := state.Consider([2 as Choice, 2]);
     print "[Consider reject] after:  ", state.result, " (returned ", res, ")\n";
     expect res.None?;
-    expect state.result == Some([7 as bv64, 9, 9]);
+    expect state.result == Some([7 as Choice, 9, 9]);
   }
 
   method {:test} TestShrinkByDeletionRemovesTrailingZeros()
   {
     // INTERESTING when the sequence starts with 5 (length-agnostic).
-    var pred := (cs: seq<bv64>) => |cs| >= 1 && cs[0] == 5;
+    var pred := (cs: seq<Choice>) => |cs| >= 1 && cs[0] == 5;
     var state := NewState(pred);
-    state.result := Some([5 as bv64, 0, 0, 0, 0]);
+    state.result := Some([5 as Choice, 0, 0, 0, 0]);
     print "\n[ShrinkByDeletion trailing] before: ", state.result, "\n";
     state.ShrinkByDeletion();
     print "[ShrinkByDeletion trailing] after:  ", state.result, "\n";
@@ -128,9 +128,9 @@ module MinithesisTest {
   method {:test} TestShrinkByDeletionLargeRun()
   {
     // INTERESTING when length >= 3 (regardless of values).
-    var pred := (cs: seq<bv64>) => |cs| >= 3;
+    var pred := (cs: seq<Choice>) => |cs| >= 3;
     var state := NewState(pred);
-    state.result := Some([1 as bv64, 1, 1, 1, 1, 1, 1, 1, 1]);
+    state.result := Some([1 as Choice, 1, 1, 1, 1, 1, 1, 1, 1]);
     print "\n[ShrinkByDeletion large] before: ", state.result, "\n";
     state.ShrinkByDeletion();
     print "[ShrinkByDeletion large] after:  ", state.result, "\n";
@@ -143,9 +143,9 @@ module MinithesisTest {
   method {:test} TestShrinkByZeroingZeroesMiddle()
   {
     // INTERESTING when length >= 5 and first element is 7.
-    var pred := (cs: seq<bv64>) => |cs| >= 5 && cs[0] == 7;
+    var pred := (cs: seq<Choice>) => |cs| >= 5 && cs[0] == 7;
     var state := NewState(pred);
-    state.result := Some([7 as bv64, 9, 9, 9, 9, 9, 9, 9, 9]);
+    state.result := Some([7 as Choice, 9, 9, 9, 9, 9, 9, 9, 9]);
     print "\n[ShrinkByZeroing] before: ", state.result, "\n";
     state.ShrinkByZeroing();
     print "[ShrinkByZeroing] after:  ", state.result, "\n";
@@ -172,9 +172,9 @@ module MinithesisTest {
     // Mirrors Java ShrinkTest.testShrinkSingleInt: INTERESTING when the
     // single choice is >= 24 (and < 1000 implicitly, since 1000 was the
     // upper bound there). Expect shrink to drive the choice toward 24.
-    var pred := (cs: seq<bv64>) => |cs| == 1 && cs[0] >= 24;
+    var pred := (cs: seq<Choice>) => |cs| == 1 && cs[0] >= 24;
     var state := NewState(pred);
-    state.result := Some([1000 as bv64]);
+    state.result := Some([1000 as Choice]);
     print "\n[ShrinkIndividualValues single] before: ", state.result, "\n";
     state.ShrinkIndividualValues();
     print "[ShrinkIndividualValues single] after:  ", state.result, "\n";
@@ -191,9 +191,11 @@ module MinithesisTest {
   method {:test} TestShrinkIndividualValuesTwoPositions()
   {
     // INTERESTING when length == 2 and sum >= 10.
-    var pred := (cs: seq<bv64>) => |cs| == 2 && cs[0] + cs[1] >= 10;
+    // Sum in int: Choice is a uint32 newtype, so `cs[0] + cs[1]` would carry an
+    // overflow obligation; the values here are tiny, so widen to int to compare.
+    var pred := (cs: seq<Choice>) => |cs| == 2 && (cs[0] as int) + (cs[1] as int) >= 10;
     var state := NewState(pred);
-    state.result := Some([100 as bv64, 100]);
+    state.result := Some([100 as Choice, 100]);
     print "\n[ShrinkIndividualValues pair] before: ", state.result, "\n";
     state.ShrinkIndividualValues();
     print "[ShrinkIndividualValues pair] after:  ", state.result, "\n";
@@ -204,7 +206,7 @@ module MinithesisTest {
     // binary search.
     expect after[0] < 100;
     expect after[1] < 100;
-    expect after[0] + after[1] >= 10;
+    expect (after[0] as int) + (after[1] as int) >= 10;
   }
 
   method {:test} TestShrinkBySwappingReorders()
@@ -214,9 +216,9 @@ module MinithesisTest {
     // only runs as part of the larger fixed-point loop in real use; here
     // we verify that calling it on a non-interesting predicate leaves
     // state.result unchanged (i.e., no swap is accepted).
-    var pred := (cs: seq<bv64>) => |cs| >= 3 && cs[0] >= cs[2];
+    var pred := (cs: seq<Choice>) => |cs| >= 3 && cs[0] >= cs[2];
     var state := NewState(pred);
-    state.result := Some([9 as bv64, 5, 0]);
+    state.result := Some([9 as Choice, 5, 0]);
     print "\n[ShrinkBySwapping] before: ", state.result, "\n";
     state.ShrinkBySwapping();
     print "[ShrinkBySwapping] after:  ", state.result, "\n";
@@ -232,9 +234,9 @@ module MinithesisTest {
     // INTERESTING when length >= 1 and first element >= 50.
     // Full Shrink() should reduce this to length 1 with first element
     // in a small neighborhood of 50.
-    var pred := (cs: seq<bv64>) => |cs| >= 1 && cs[0] >= 50;
+    var pred := (cs: seq<Choice>) => |cs| >= 1 && cs[0] >= 50;
     var state := NewState(pred);
-    state.result := Some([999 as bv64, 100, 100, 100]);
+    state.result := Some([999 as Choice, 100, 100, 100]);
     print "\n[Full Shrink] before: ", state.result, "\n";
     state.Shrink();
     print "[Full Shrink] after:  ", state.result, "\n";
@@ -248,27 +250,27 @@ module MinithesisTest {
   method {:test} TestReplaceSingleAccepts()
   {
     // Verifies the ReplaceSingle helper independently of binary search.
-    var pred := (cs: seq<bv64>) => |cs| == 2 && cs[0] >= 10;
+    var pred := (cs: seq<Choice>) => |cs| == 2 && cs[0] >= 10;
     var state := NewState(pred);
-    state.result := Some([50 as bv64, 99]);
+    state.result := Some([50 as Choice, 99]);
     print "\n[ReplaceSingle] before: ", state.result, "\n";
-    var r := state.ReplaceSingle(0, 20 as bv64);
+    var r := state.ReplaceSingle(0, 20 as Choice);
     print "[ReplaceSingle] after:  ", state.result, " (returned ", r, ")\n";
     expect r.Some?;
-    expect state.result == Some([20 as bv64, 99]);
+    expect state.result == Some([20 as Choice, 99]);
   }
 
   method {:test} TestReplaceMultipleAccepts()
   {
     // Replace both positions at once.
-    var pred := (cs: seq<bv64>) => |cs| == 3 && cs[1] == 4;
+    var pred := (cs: seq<Choice>) => |cs| == 3 && cs[1] == 4;
     var state := NewState(pred);
-    state.result := Some([7 as bv64, 4, 5]);
+    state.result := Some([7 as Choice, 4, 5]);
     print "\n[ReplaceMultiple] before: ", state.result, "\n";
-    var r := state.ReplaceMultiple(map[0 := 1 as bv64, 2 := 2 as bv64]);
+    var r := state.ReplaceMultiple(map[0 := 1 as Choice, 2 := 2 as Choice]);
     print "[ReplaceMultiple] after:  ", state.result, " (returned ", r, ")\n";
     expect r.Some?;
-    expect state.result == Some([1 as bv64, 4, 2]);
+    expect state.result == Some([1 as Choice, 4, 2]);
   }
 
   // ============================================================

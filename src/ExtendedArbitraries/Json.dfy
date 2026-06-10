@@ -8,7 +8,7 @@ include "../utils.dfy"
 // there and generation terminates. Each kind is registered by its own helper so
 // the Tuple/Mix disjointness proofs run in a small context.
 module ExtJson {
-  import opened Arbitrary
+  import opened Arbitraries
   import opened LTLUtils
 
   const ALNUM: seq<char> :=

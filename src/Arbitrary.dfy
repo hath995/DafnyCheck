@@ -1,20 +1,20 @@
 include "./RandomGenerator.dfy"
 include "./TestStatus.dfy"
 include "./TestResult.dfy"
-module Arbitrary {
-  import opened TestResult
+module Arbitraries {
+  import opened TestResults
   import opened RandomGenerator
   import opened TestTypes
   import opened Std.Wrappers
   class TestCase {
     ghost var repr: set<object>
-    var prefix: seq<bv64>
+    var prefix: seq<Choice>
     var random: XoroShift128Plus
     var maxSize: nat
     var printResults: bool
     var depth: nat
     var targetingScore: nat
-    var choices: seq<bv64>
+    var choices: seq<Choice>
 
     ghost predicate Valid()
       reads this
@@ -22,7 +22,7 @@ module Arbitrary {
       this.repr == {this, random}
     }
 
-    constructor(prefix: seq<bv64>, random: XoroShift128Plus, maxSize: nat, printResults: bool)
+    constructor(prefix: seq<Choice>, random: XoroShift128Plus, maxSize: nat, printResults: bool)
       requires 0 < maxSize
       ensures this.random == random
       ensures this.prefix == prefix
@@ -43,7 +43,7 @@ module Arbitrary {
     }
 
     // Static factory method for creating TestCase from choices
-    static method ForChoices(choices: seq<bv64>, seed: bv64, printResults: bool) returns (tc: TestCase)
+    static method ForChoices(choices: seq<Choice>, seed: bv64, printResults: bool) returns (tc: TestCase)
       requires 0 < |choices|
       ensures fresh(tc)
       ensures fresh(tc.random)
@@ -71,7 +71,7 @@ module Arbitrary {
     // }
 
     // // Force a specific choice
-    method ForcedChoice(n: bv64) returns (result: TestResult<bv64>)
+    method ForcedChoice(n: Choice) returns (result: TestResult<Choice>)
       requires 0 <= n
       ensures result.value.Some? ==> |choices| > old(|choices|)
       ensures old(this.Valid()) ==> this.Valid()
@@ -83,20 +83,22 @@ module Arbitrary {
         assert false;
       }
       if (|choices| > maxSize) {
-        result := new TestResult<bv64>(Some(OVERRUN), None);
+        result := new TestResult<Choice>(Some(OVERRUN), None);
         return;
       }
       choices := choices + [n];
-      result := new TestResult<bv64>(None, Some(n));
+      result := new TestResult<Choice>(None, Some(n));
     }
 
-    // Boolean choice with 50% probability
+    // Boolean choice with 50% probability. Native: one Choice draw, compare against
+    // MOD/2. No real, no bv64 — a boolean is not "an arbitrary for real".
     method BooleanChoice() returns (result: bool)
       ensures old(this.Valid()) ==> this.Valid()
       // ensures old(repr) == repr
       modifies this, random
     {
-      result := Weighted(0.5);
+      var rnd := this.random.unsafeNextChoice();
+      result := rnd < 1073741823;   // floor((2^31-1)/2); ~50%
     }
 
     // Weighted boolean choice
@@ -122,22 +124,25 @@ module Arbitrary {
     //   ensures result.value.Some?
       modifies this, random
     {
-      var intResult: TestResult<bv64>;
+      var intResult: TestResult<Choice>;
       if (p <= 0.0) {
         intResult := ForcedChoice(0);
       } else if (p >= 1.0) {
         intResult := ForcedChoice(1);
       } else {
-        var randomValue := this.random.unsafeNextReal();
-        var choice := if randomValue < p then 1 else 0;
-        // this.repr := {this, c};
-        intResult := new TestResult<bv64>(None, Some(choice));
+        // Convert the real probability to a native threshold ONCE (the only real op,
+        // at the boundary where the caller supplied a real `p`), then draw + compare
+        // entirely in native Choice arithmetic. 0 < p < 1 => 0 <= thr < MOD < 2^32.
+        var rnd := this.random.unsafeNextChoice();
+        var thr: Choice := (p * 2147483647.0).Floor as Choice;
+        var choice: Choice := if rnd < thr then 1 else 0;
+        intResult := new TestResult<Choice>(None, Some(choice));
       }
       result := intResult.Map<bool>((i) => i == 1);
     }
 
     // Internal method to make a choice
-    method MakeChoice(n: bv64) returns (result: TestResult<bv64>)
+    method MakeChoice(n: Choice) returns (result: TestResult<Choice>)
       requires 0 < n
       ensures old(this.Valid()) ==> this.Valid()
       ensures old(repr) == repr
@@ -148,34 +153,34 @@ module Arbitrary {
     }
 
     // Internal method to make a choice with custom random function
-    method MakeChoice_(n: bv64, randomFunc: bv64 -> bv64) returns (result: TestResult<bv64>)
+    method MakeChoice_(n: Choice, randomFunc: Choice -> Choice) returns (result: TestResult<Choice>)
       requires 0 < n
       ensures old(this.Valid()) ==> this.Valid()
       ensures old(repr) == repr
       modifies this`choices, random
-      // ensures result.value.Some? ==> exists x: bv64 :: randomFunc(x) == result.value.Extract();
+      // ensures result.value.Some? ==> exists x: Choice :: randomFunc(x) == result.value.Extract();
     {
       if (|choices| >= maxSize) {
-        result := new TestResult<bv64>(Some(OVERRUN), None);
+        result := new TestResult<Choice>(Some(OVERRUN), None);
         return;
       }
 
-      var choiceResult: bv64;
+      var choiceResult: Choice;
       if (|choices| < |prefix|) {
         choiceResult := prefix[|choices|];
       } else {
-        var rand := this.random.unsafeNext();
+        var rand := this.random.unsafeNextChoice();
         choiceResult := randomFunc(rand);
       }
       // Valid choices index 0..n-1 (the random path uses rand % n, and callers
       // like OfTransformable index args[choice] with n == |args|). A replayed
       // prefix choice equal to n must therefore be rejected, not just one > n.
       if (choiceResult >= n) {
-        result := new TestResult<bv64>(Some(INVALID), None);
+        result := new TestResult<Choice>(Some(INVALID), None);
         return;
       }
       choices := choices + [choiceResult];
-      result := new TestResult<bv64>(None, Some(choiceResult));
+      result := new TestResult<Choice>(None, Some(choiceResult));
     }
 
     // Check if should print debug information
@@ -217,7 +222,7 @@ module Arbitrary {
     }
 
     // Get choices
-    function GetChoices(): seq<bv64>
+    function GetChoices(): seq<Choice>
       reads this
     {
       choices
@@ -242,7 +247,10 @@ module Arbitrary {
     }
   }
 
-    const MaxLong := 0xFFFFFFFFFFFFFFFF
+    // Choice bound for generator arguments. Was MaxLong (2^64-1, the old bv64 choice
+    // base); now MaxChoice (2^32-1) since choices are uint32 — imported from
+    // RandomGenerator. Generator args (|args|, max-min, |possibilities|, list bound)
+    // are cast `as Choice` for MakeChoice, so they must fit a uint32.
     trait Transformable<T> {
         ghost var repr: set<object>
         ghost var childRepr: set<object>
@@ -271,7 +279,7 @@ module Arbitrary {
         constructor(args: seq<T>)
             ensures fresh(this)
             ensures fresh(this.repr)
-            requires 0 < |args| <= MaxLong
+            requires 0 < |args| <= MaxChoice
             ensures Valid()
         {
             this.args := args;
@@ -286,7 +294,7 @@ module Arbitrary {
             ensures Valid() ==> this.repr == {this} + childRepr
             decreases repr, childRepr
         {
-            this in repr && 0 < |args| <= MaxLong && childRepr < this.repr && this.repr == {this} + childRepr
+            this in repr && 0 < |args| <= MaxChoice && childRepr < this.repr && this.repr == {this} + childRepr
         }
 
         method Apply(tc: TestCase) returns (result: T)
@@ -300,7 +308,7 @@ module Arbitrary {
             decreases repr, childRepr
             modifies tc, tc.random
         {
-            var choiceResult := tc.MakeChoice(|args| as bv64);
+            var choiceResult := tc.MakeChoice(|args| as Choice);
             if choiceResult.value.Some? {
                 expect choiceResult.value.Extract() as int < |args|;
                 return args[choiceResult.Unwrap() as int];
@@ -353,7 +361,7 @@ module Arbitrary {
         constructor(min: int, max: int)
             ensures fresh(this)
             ensures fresh(this.repr)
-            requires min <= max && (0 < max - min <= MaxLong)
+            requires min <= max && (0 < max - min <= MaxChoice)
             ensures Valid()
         {
             this.min := min;
@@ -369,7 +377,7 @@ module Arbitrary {
             ensures Valid() ==> this.repr == {this} + childRepr
             decreases repr, childRepr
         {
-            this in repr && min <= max && (0 < max - min <= MaxLong) && childRepr < this.repr && this.repr == {this} + childRepr
+            this in repr && min <= max && (0 < max - min <= MaxChoice) && childRepr < this.repr && this.repr == {this} + childRepr
         }
 
         method Apply(tc: TestCase) returns (result: int)
@@ -383,7 +391,7 @@ module Arbitrary {
             decreases repr, childRepr
             modifies tc, tc.random
         {
-            var choiceResult := tc.MakeChoice((max - min) as bv64);
+            var choiceResult := tc.MakeChoice((max - min) as Choice);
             if choiceResult.value.Some? {
                 result := min + (choiceResult.Unwrap() as int);
             } else {
@@ -421,7 +429,7 @@ module Arbitrary {
         constructor(possibilities: seq<Arbitrary<T>>)
             ensures fresh(this)
             // ensures fresh(this.repr)
-            requires 0 < |possibilities| < MaxLong
+            requires 0 < |possibilities| < MaxChoice
             requires forall x,y :: x in possibilities && y in possibilities && x != y ==> x.internalFunction.repr !! y.internalFunction.repr
             requires forall i :: 0 <= i < |possibilities| ==> possibilities[i].Valid()
             ensures Valid()
@@ -439,7 +447,7 @@ module Arbitrary {
             decreases repr, childRepr
         {
             this in repr && 
-            0 < |possibilities| < MaxLong && 
+            0 < |possibilities| < MaxChoice && 
             (forall i :: 0 <= i < |possibilities| ==> possibilities[i].internalFunction in childRepr) &&
             (forall i :: 0 <= i < |possibilities| ==> possibilities[i].internalFunction.repr <= childRepr) &&
             (forall x,y :: x in possibilities && y in possibilities && x != y ==> x.internalFunction.repr !! y.internalFunction.repr) &&
@@ -461,7 +469,7 @@ module Arbitrary {
             decreases repr, childRepr
             modifies tc, tc.random
         {
-            var choiceResult := tc.MakeChoice(|possibilities| as bv64);
+            var choiceResult := tc.MakeChoice(|possibilities| as Choice);
             if choiceResult.value.Some? {
                 var choice := choiceResult.Unwrap() as int;
                 expect choice < |possibilities|;
@@ -663,7 +671,7 @@ module Arbitrary {
                     }
                 }
                 var charChoice := if ascii then 128 else 0x0000D800;
-                var choiceResult := tc.MakeChoice(charChoice as bv64);
+                var choiceResult := tc.MakeChoice(charChoice as Choice);
                 var charValue := if choiceResult.value.Some? then choiceResult.Unwrap() else 0;
                 assume {:axiom} 0 <= charValue < 0x0000D800;
                 chars := chars + [charValue as nat];
@@ -1062,7 +1070,7 @@ module Arbitrary {
     class NatsTransformable extends Transformable<nat> {
         var bound: nat
         constructor(bound: nat)
-            requires 0 < bound <= MaxLong
+            requires 0 < bound <= MaxChoice
             ensures fresh(this)
             ensures fresh(this.repr)
             ensures Valid()
@@ -1078,7 +1086,7 @@ module Arbitrary {
             ensures Valid() ==> this.repr == {this} + childRepr
             decreases repr, childRepr
         {
-            this.repr == {this} + childRepr && childRepr < this.repr && 0 < bound <= MaxLong
+            this.repr == {this} + childRepr && childRepr < this.repr && 0 < bound <= MaxChoice
         }
         method Apply(tc: TestCase) returns (result: nat)
             requires allocated(tc)
@@ -1091,7 +1099,7 @@ module Arbitrary {
             decreases repr, childRepr
             modifies tc, tc.random
         {
-            var c := tc.MakeChoice(bound as bv64);
+            var c := tc.MakeChoice(bound as Choice);
             if c.value.Some? {
                 result := c.Unwrap() as nat;
             } else {
@@ -1288,10 +1296,14 @@ module Arbitrary {
             requires tc.Valid() ensures tc.Valid() ensures tc.repr == old(tc.repr)
             decreases repr, childRepr modifies tc, tc.random
         {
-            var c := tc.MakeChoice(0x100000000);
-            var v := if c.value.Some? then c.Unwrap() else 0;
-            assume {:axiom} v < 0x100000000;
-            result := v as bv32;
+            // The native lane only spans 31 bits, so assemble 32 bits from two 16-bit
+            // Choice chunks. Each chunk is < 2^16 (MakeChoice rejects >= n), so the
+            // Choice -> bv32 casts are total and the chunks never overlap.
+            var c0 := tc.MakeChoice(0x10000);
+            var w0 := if c0.value.Some? then c0.Unwrap() else 0;
+            var c1 := tc.MakeChoice(0x10000);
+            var w1 := if c1.value.Some? then c1.Unwrap() else 0;
+            result := ((w0 as bv32) << 16) | (w1 as bv32);
         }
     }
 
@@ -1311,8 +1323,17 @@ module Arbitrary {
             requires tc.Valid() ensures tc.Valid() ensures tc.repr == old(tc.repr)
             decreases repr, childRepr modifies tc, tc.random
         {
-            var c := tc.MakeChoice(MaxLong as bv64);
-            result := if c.value.Some? then c.Unwrap() else 0;
+            // 64 bits from four 16-bit Choice chunks (the native lane spans only 31).
+            var c0 := tc.MakeChoice(0x10000);
+            var w0 := if c0.value.Some? then c0.Unwrap() else 0;
+            var c1 := tc.MakeChoice(0x10000);
+            var w1 := if c1.value.Some? then c1.Unwrap() else 0;
+            var c2 := tc.MakeChoice(0x10000);
+            var w2 := if c2.value.Some? then c2.Unwrap() else 0;
+            var c3 := tc.MakeChoice(0x10000);
+            var w3 := if c3.value.Some? then c3.Unwrap() else 0;
+            result := ((w0 as bv64) << 48) | ((w1 as bv64) << 32) |
+                      ((w2 as bv64) << 16) | (w3 as bv64);
         }
     }
 
@@ -1332,11 +1353,27 @@ module Arbitrary {
             requires tc.Valid() ensures tc.Valid() ensures tc.repr == old(tc.repr)
             decreases repr, childRepr modifies tc, tc.random
         {
-            var c1 := tc.MakeChoice(MaxLong as bv64);
-            var hi := if c1.value.Some? then c1.Unwrap() else 0;
-            var c2 := tc.MakeChoice(MaxLong as bv64);
-            var lo := if c2.value.Some? then c2.Unwrap() else 0;
-            result := ((hi as bv128) << 64) | (lo as bv128);
+            // 128 bits from eight 16-bit Choice chunks.
+            var c0 := tc.MakeChoice(0x10000);
+            var w0 := if c0.value.Some? then c0.Unwrap() else 0;
+            var c1 := tc.MakeChoice(0x10000);
+            var w1 := if c1.value.Some? then c1.Unwrap() else 0;
+            var c2 := tc.MakeChoice(0x10000);
+            var w2 := if c2.value.Some? then c2.Unwrap() else 0;
+            var c3 := tc.MakeChoice(0x10000);
+            var w3 := if c3.value.Some? then c3.Unwrap() else 0;
+            var c4 := tc.MakeChoice(0x10000);
+            var w4 := if c4.value.Some? then c4.Unwrap() else 0;
+            var c5 := tc.MakeChoice(0x10000);
+            var w5 := if c5.value.Some? then c5.Unwrap() else 0;
+            var c6 := tc.MakeChoice(0x10000);
+            var w6 := if c6.value.Some? then c6.Unwrap() else 0;
+            var c7 := tc.MakeChoice(0x10000);
+            var w7 := if c7.value.Some? then c7.Unwrap() else 0;
+            result := ((w0 as bv128) << 112) | ((w1 as bv128) << 96) |
+                      ((w2 as bv128) << 80)  | ((w3 as bv128) << 64) |
+                      ((w4 as bv128) << 48)  | ((w5 as bv128) << 32) |
+                      ((w6 as bv128) << 16)  | (w7 as bv128);
         }
     }
 
@@ -1356,16 +1393,31 @@ module Arbitrary {
             requires tc.Valid() ensures tc.Valid() ensures tc.repr == old(tc.repr)
             decreases repr, childRepr modifies tc, tc.random
         {
-            var c1 := tc.MakeChoice(MaxLong as bv64);
-            var w0 := if c1.value.Some? then c1.Unwrap() else 0;
-            var c2 := tc.MakeChoice(MaxLong as bv64);
-            var w1 := if c2.value.Some? then c2.Unwrap() else 0;
-            var c3 := tc.MakeChoice(MaxLong as bv64);
-            var w2 := if c3.value.Some? then c3.Unwrap() else 0;
-            var c4 := tc.MakeChoice(MaxLong as bv64);
-            var w3 := if c4.value.Some? then c4.Unwrap() else 0;
-            result := ((w0 as bv256) << 192) | ((w1 as bv256) << 128) |
-                      ((w2 as bv256) << 64) | (w3 as bv256);
+            // 256 bits from sixteen 16-bit Choice chunks.
+            var c0 := tc.MakeChoice(0x10000);  var w0 := if c0.value.Some? then c0.Unwrap() else 0;
+            var c1 := tc.MakeChoice(0x10000);  var w1 := if c1.value.Some? then c1.Unwrap() else 0;
+            var c2 := tc.MakeChoice(0x10000);  var w2 := if c2.value.Some? then c2.Unwrap() else 0;
+            var c3 := tc.MakeChoice(0x10000);  var w3 := if c3.value.Some? then c3.Unwrap() else 0;
+            var c4 := tc.MakeChoice(0x10000);  var w4 := if c4.value.Some? then c4.Unwrap() else 0;
+            var c5 := tc.MakeChoice(0x10000);  var w5 := if c5.value.Some? then c5.Unwrap() else 0;
+            var c6 := tc.MakeChoice(0x10000);  var w6 := if c6.value.Some? then c6.Unwrap() else 0;
+            var c7 := tc.MakeChoice(0x10000);  var w7 := if c7.value.Some? then c7.Unwrap() else 0;
+            var c8 := tc.MakeChoice(0x10000);  var w8 := if c8.value.Some? then c8.Unwrap() else 0;
+            var c9 := tc.MakeChoice(0x10000);  var w9 := if c9.value.Some? then c9.Unwrap() else 0;
+            var c10 := tc.MakeChoice(0x10000); var w10 := if c10.value.Some? then c10.Unwrap() else 0;
+            var c11 := tc.MakeChoice(0x10000); var w11 := if c11.value.Some? then c11.Unwrap() else 0;
+            var c12 := tc.MakeChoice(0x10000); var w12 := if c12.value.Some? then c12.Unwrap() else 0;
+            var c13 := tc.MakeChoice(0x10000); var w13 := if c13.value.Some? then c13.Unwrap() else 0;
+            var c14 := tc.MakeChoice(0x10000); var w14 := if c14.value.Some? then c14.Unwrap() else 0;
+            var c15 := tc.MakeChoice(0x10000); var w15 := if c15.value.Some? then c15.Unwrap() else 0;
+            result := ((w0 as bv256) << 240)  | ((w1 as bv256) << 224) |
+                      ((w2 as bv256) << 208)  | ((w3 as bv256) << 192) |
+                      ((w4 as bv256) << 176)  | ((w5 as bv256) << 160) |
+                      ((w6 as bv256) << 144)  | ((w7 as bv256) << 128) |
+                      ((w8 as bv256) << 112)  | ((w9 as bv256) << 96)  |
+                      ((w10 as bv256) << 80)  | ((w11 as bv256) << 64)  |
+                      ((w12 as bv256) << 48)  | ((w13 as bv256) << 32)  |
+                      ((w14 as bv256) << 16)  | (w15 as bv256);
         }
     }
 
@@ -1548,7 +1600,7 @@ module Arbitrary {
             ensures p.Valid()
             ensures fresh(p.internalFunction)
             ensures fresh(p.internalFunction.repr)
-            requires 0 < |args| <= MaxLong
+            requires 0 < |args| <= MaxChoice
         {
             var ofTransformable := new OfTransformable<T>(args);
             p := Arbitrary(ofTransformable);
@@ -1567,7 +1619,7 @@ module Arbitrary {
             ensures p.Valid()
             ensures fresh(p.internalFunction)
             ensures fresh(p.internalFunction.repr)
-            requires min <= max && (0 < max- min < MaxLong)
+            requires min <= max && (0 < max- min < MaxChoice)
         {
             var rangeTransformable := new RangeTransformable(min, max);
             p := Arbitrary(rangeTransformable);
@@ -1581,7 +1633,7 @@ module Arbitrary {
         // }
 
         static method Mix<T>(possibilities: seq<Arbitrary<T>>) returns (p: Arbitrary<T>)
-            requires 0 < |possibilities| < MaxLong
+            requires 0 < |possibilities| < MaxChoice
             requires forall i :: 0 <= i < |possibilities| ==> possibilities[i].Valid()
             requires forall x,y :: x in possibilities && y in possibilities && x != y ==> x.internalFunction.repr !! y.internalFunction.repr
             ensures p.Valid()
@@ -1602,7 +1654,7 @@ module Arbitrary {
         }
 
         static method Nats(bound: nat) returns (p: Arbitrary<nat>)
-            requires 0 < bound <= MaxLong
+            requires 0 < bound <= MaxChoice
             ensures p.Valid()
             ensures fresh(p.internalFunction)
             ensures fresh(p.internalFunction.repr)

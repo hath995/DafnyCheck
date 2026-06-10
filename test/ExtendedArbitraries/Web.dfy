@@ -2,7 +2,7 @@ include "../../src/ExtendedArbitraries/Web.dfy"
 include "../../src/RandomGenerator.dfy"
 
 module ExtWebTest {
-  import opened Arbitrary
+  import opened Arbitraries
   import opened RandomGenerator
   import opened ExtWeb
 

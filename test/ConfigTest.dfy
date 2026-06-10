@@ -4,8 +4,8 @@ include "../src/DafnyCheck.dfy"
 // always-tested examples, plus the boolean pass/fail return value.
 module ConfigTest {
   import opened DafnyCheck
-  import opened Arbitrary
-  import opened RunConfig
+  import opened Arbitraries
+  import opened RunConfigs
   import opened Std.Wrappers
 
   method {:test} TestConfigSeedAndClassifier() {

@@ -8,7 +8,7 @@ include "../src/RandomGenerator.dfy"
 // the generated value conforms to its expected type and bounds with `expect`
 // (runtime checks — MakeChoice has no proven static upper bound).
 module CoreArbitrariesTest {
-  import opened Arbitrary
+  import opened Arbitraries
   import opened RandomGenerator
 
   // ---- primitive value generators ----

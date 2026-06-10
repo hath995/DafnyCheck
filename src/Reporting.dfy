@@ -1,6 +1,7 @@
 include "./colors.dfy"
 include "./RunConfig.dfy"
 include "./utils.dfy"
+include "./RandomGenerator.dfy"
 
 // Unified, color-aware, verbosity-gated reporting for test runs. Every run
 // method routes its output through these helpers so formatting stays
@@ -10,8 +11,9 @@ include "./utils.dfy"
 // independent of the input type.
 module Reporting {
   import opened ConsoleColors
-  import opened RunConfig
+  import opened RunConfigs
   import opened LTLUtils
+  import opened RandomGenerator
   import opened Std.Wrappers
 
   // Wrap `text` in an ANSI color when enabled, otherwise return it unchanged.
@@ -49,7 +51,7 @@ module Reporting {
 
   // Report a generation counterexample: the failing input plus the minimised
   // choice sequence that reproduces it.
-  method ReportCounterExample<T>(value: T, choices: seq<bv64>, useColor: bool, verbosity: Verbosity)
+  method ReportCounterExample<T>(value: T, choices: seq<Choice>, useColor: bool, verbosity: Verbosity)
   {
     if verbosity != Off {
       print "  ", Colorize("counterexample", YELLOW, useColor), ": ", value, "\n";
@@ -66,7 +68,7 @@ module Reporting {
   }
 
   // Trace one generated value and its choice sequence (High verbosity only).
-  method ReportGenerated<T>(value: Option<T>, choices: seq<bv64>, valid: bool, useColor: bool, verbosity: Verbosity)
+  method ReportGenerated<T>(value: Option<T>, choices: seq<Choice>, valid: bool, useColor: bool, verbosity: Verbosity)
   {
     if AtLeast(verbosity, High) {
       print "  ", Colorize("gen", CYAN, useColor), if valid then " ok   " else " skip ", "choices=", choices;
@@ -78,7 +80,7 @@ module Reporting {
   }
 
   // Report a single accepted shrink step (High verbosity only).
-  method ReportShrink(before: seq<bv64>, after: seq<bv64>, useColor: bool, verbosity: Verbosity)
+  method ReportShrink(before: seq<Choice>, after: seq<Choice>, useColor: bool, verbosity: Verbosity)
   {
     if AtLeast(verbosity, High) {
       print "  ", Colorize("shrink", CYAN, useColor), ": ", before, " -> ", after, "\n";
@@ -99,7 +101,7 @@ module Reporting {
   // ordered by label. Buckets come from a classifier applied to generated inputs.
   method ReportStatistics(name: string, stats: map<string, nat>, useColor: bool, verbosity: Verbosity)
   {
-    if verbosity != Off && |stats| > 0 {
+    if |stats| > 0 {  // log whenever a classifier produced buckets, at any verbosity
       var total := TotalCount(stats);
       print Colorize("[" + name + "] statistics", CYAN, useColor),
             " (", total, " classified):\n";

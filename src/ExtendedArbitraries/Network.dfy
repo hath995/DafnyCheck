@@ -3,7 +3,7 @@ include "../utils.dfy"
 
 // Network-address arbitraries (IPv4, IPv6), composed from core generators.
 module ExtNetwork {
-  import opened Arbitrary
+  import opened Arbitraries
   import opened LTLUtils
 
   const HEX_DIGITS: seq<char> :=

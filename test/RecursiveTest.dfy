@@ -7,7 +7,7 @@ include "../src/RandomGenerator.dfy"
 // so a node can have any number of children. "Leaf" is the base case, and the
 // TestCase depth budget (maxDepth) falls back to it so generation terminates.
 module RecursiveTest {
-  import opened Arbitrary
+  import opened Arbitraries
   import opened RandomGenerator
 
   datatype Tree = Leaf(n: int) | Node(kids: seq<Tree>)

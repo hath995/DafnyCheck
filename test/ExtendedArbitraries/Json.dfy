@@ -2,7 +2,7 @@ include "../../src/ExtendedArbitraries/Json.dfy"
 include "../../src/RandomGenerator.dfy"
 
 module ExtJsonTest {
-  import opened Arbitrary
+  import opened Arbitraries
   import opened RandomGenerator
   import opened ExtJson
 

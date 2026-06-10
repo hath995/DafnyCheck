@@ -10,7 +10,7 @@ include "../src/RandomGenerator.dfy"
 // Each node type is registered by its own helper so the Tuple/Mix disjointness
 // proofs run in a small context (they get slow if everything shares one method).
 module WeirdTreeTest {
-  import opened Arbitrary
+  import opened Arbitraries
   import opened RandomGenerator
 
   datatype WeirdTree =

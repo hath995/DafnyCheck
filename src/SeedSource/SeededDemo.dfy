@@ -7,7 +7,7 @@ include "./SeededTesting.dfy"
 // Main is in the default module (see SeedSourceDemo.dfy for why, re: Java).
 import opened SeedSource
 import opened SeededTesting
-import opened Arbitrary
+import opened Arbitraries
 
 method Main() {
   var s := GetSeed();

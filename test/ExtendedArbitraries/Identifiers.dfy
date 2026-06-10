@@ -2,7 +2,7 @@ include "../../src/ExtendedArbitraries/Identifiers.dfy"
 include "../../src/RandomGenerator.dfy"
 
 module ExtIdentifiersTest {
-  import opened Arbitrary
+  import opened Arbitraries
   import opened RandomGenerator
   import opened ExtIdentifiers
 
