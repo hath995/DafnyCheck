@@ -19,7 +19,8 @@ module Arbitraries {
     ghost predicate Valid()
       reads this
     {
-      this.repr == {this, random}
+      this.repr == {this, random} &&
+      |choices| <= maxSize
     }
 
     constructor(prefix: seq<Choice>, random: XoroShift128Plus, maxSize: nat, printResults: bool)
@@ -73,7 +74,9 @@ module Arbitraries {
     // // Force a specific choice
     method ForcedChoice(n: Choice) returns (result: TestResult<Choice>)
       requires 0 <= n
-      ensures result.value.Some? ==> |choices| > old(|choices|)
+      ensures |choices| >= old(|choices|)
+      ensures result.value.Some? ==> |choices| == old(|choices|) + 1
+      ensures result.value.None? ==> choices == old(choices)
       ensures old(this.Valid()) ==> this.Valid()
       ensures old(repr) == repr
       modifies this
@@ -82,7 +85,10 @@ module Arbitraries {
         // TODO: Handle IllegalArgumentException
         assert false;
       }
-      if (|choices| > maxSize) {
+      // Buffer-exhaustion check: at |choices| == maxSize the buffer is full, so we
+      // must OVERRUN rather than append (keeping |choices| <= maxSize, the well-
+      // foundedness invariant for the Apply buffer metric maxSize - |choices|).
+      if (|choices| >= maxSize) {
         result := new TestResult<Choice>(Some(OVERRUN), None);
         return;
       }
@@ -144,6 +150,9 @@ module Arbitraries {
     // Internal method to make a choice
     method MakeChoice(n: Choice) returns (result: TestResult<Choice>)
       requires 0 < n
+      ensures |choices| >= old(|choices|)
+      ensures result.value.Some? ==> |choices| == old(|choices|) + 1
+      ensures result.value.None? ==> choices == old(choices)
       ensures old(this.Valid()) ==> this.Valid()
       ensures old(repr) == repr
       modifies this`choices, random
@@ -155,6 +164,9 @@ module Arbitraries {
     // Internal method to make a choice with custom random function
     method MakeChoice_(n: Choice, randomFunc: Choice -> Choice) returns (result: TestResult<Choice>)
       requires 0 < n
+      ensures |choices| >= old(|choices|)
+      ensures result.value.Some? ==> |choices| == old(|choices|) + 1
+      ensures result.value.None? ==> choices == old(choices)
       ensures old(this.Valid()) ==> this.Valid()
       ensures old(repr) == repr
       modifies this`choices, random
