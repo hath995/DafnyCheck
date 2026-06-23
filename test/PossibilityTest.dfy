@@ -556,7 +556,11 @@ module PossibilityTest {
     }
     method {:test} TestFlatMap() {
         var rng := XoroShift128Plus.fromSeed(42);
-        var tc := new TestCase([], rng, 100, true);
+        // Five Prufer draws share one tc, and choices accumulate across draws. Each draw
+        // is large (base int + marker + a fixed-length list of up to ~24 elements, ~2t+3
+        // choices), so the buffer must hold all five or a later draw overruns -> None
+        // (the faithful finite-buffer behavior, previously hidden by silent defaulting).
+        var tc := new TestCase([], rng, 1000, true);
         var range1Arb := Arbitrary<int>.Range(1, 25);
         assert fresh(range1Arb.internalFunction.repr);
         var pfm := new PruferFlatMap();
