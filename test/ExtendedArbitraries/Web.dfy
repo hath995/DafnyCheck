@@ -1,4 +1,4 @@
-include "../../src/ExtendedArbitraries/Web.dfy"
+﻿include "../../src/ExtendedArbitraries/Web.dfy"
 include "../../src/RandomGenerator.dfy"
 
 module ExtWebTest {
@@ -10,7 +10,7 @@ module ExtWebTest {
     var arb := Domain();
     var rng := XoroShift128Plus.fromSeed(42);
     var tc := new TestCase([], rng, 100, true);
-    var res := arb.Apply(tc);
+    var res_o := arb.Apply(tc); expect res_o.Some?; var res := res_o.value;
     expect '.' in res;
     print "Domain: ", res, "\n";
   }
@@ -19,7 +19,7 @@ module ExtWebTest {
     var arb := Email();
     var rng := XoroShift128Plus.fromSeed(42);
     var tc := new TestCase([], rng, 100, true);
-    var res := arb.Apply(tc);
+    var res_o := arb.Apply(tc); expect res_o.Some?; var res := res_o.value;
     expect '@' in res;
     print "Email: ", res, "\n";
   }

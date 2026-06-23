@@ -244,7 +244,7 @@ module Arbitraries {
     }
 
     // Apply a possibility to generate a value
-    method Any<T>(possibility: Arbitrary<T>) returns (result: T)
+    method Any<T>(possibility: Arbitrary<T>) returns (result: Option<T>)
       requires possibility.internalFunction.repr !! this.repr
       requires possibility.Valid()
       requires Valid()
@@ -269,7 +269,7 @@ module Arbitraries {
     trait Transformable<T> {
         ghost var repr: set<object>
         ghost var childRepr: set<object>
-        method Apply(tc: TestCase) returns (result: T)
+        method Apply(tc: TestCase) returns (result: Option<T>)
             requires allocated(tc)
             requires tc.Valid()
             requires this.Valid()
@@ -314,7 +314,7 @@ module Arbitraries {
             this in repr && 0 < |args| <= MaxChoice && childRepr < this.repr && this.repr == {this} + childRepr
         }
 
-        method Apply(tc: TestCase) returns (result: T)
+        method Apply(tc: TestCase) returns (result: Option<T>)
             requires allocated(tc)
             requires this.Valid()
             requires tc.Valid()
@@ -330,9 +330,9 @@ module Arbitraries {
             var choiceResult := tc.MakeChoice(|args| as Choice);
             if choiceResult.value.Some? {
                 expect choiceResult.value.Extract() as int < |args|;
-                return args[choiceResult.Unwrap() as int];
+                return Some(args[choiceResult.Unwrap() as int]);
             }else{
-                return args[0];
+                return None;
             }
         }
     }
@@ -359,7 +359,7 @@ module Arbitraries {
             this in this.repr && childRepr < this.repr && this.repr == {this} + childRepr
         }
 
-        method Apply(tc: TestCase) returns (result: T)
+        method Apply(tc: TestCase) returns (result: Option<T>)
             requires allocated(tc)
             requires this.Valid()
             requires tc.Valid()
@@ -372,7 +372,7 @@ module Arbitraries {
             decreases tc.maxSize - |tc.choices|, repr, childRepr
             modifies tc, tc.random
         {
-            result := this.value;
+            result := Some(this.value);
         }
     }
 
@@ -401,7 +401,7 @@ module Arbitraries {
             this in repr && min <= max && (0 < max - min <= MaxChoice) && childRepr < this.repr && this.repr == {this} + childRepr
         }
 
-        method Apply(tc: TestCase) returns (result: int)
+        method Apply(tc: TestCase) returns (result: Option<int>)
             requires allocated(tc)
             requires tc.Valid()
             requires this.Valid()
@@ -416,9 +416,9 @@ module Arbitraries {
         {
             var choiceResult := tc.MakeChoice((max - min) as Choice);
             if choiceResult.value.Some? {
-                result := min + (choiceResult.Unwrap() as int);
+                result := Some(min + (choiceResult.Unwrap() as int));
             } else {
-                result := min;
+                result := None;
             }
         }
     }
@@ -480,7 +480,7 @@ module Arbitraries {
             (forall i :: 0 <= i < |possibilities| ==> possibilities[i].Valid())
         }
 
-        method Apply(tc: TestCase) returns (result: T)
+        method Apply(tc: TestCase) returns (result: Option<T>)
             requires allocated(tc)
             requires tc.Valid()
             requires this.Valid()
@@ -498,11 +498,10 @@ module Arbitraries {
             if choiceResult.value.Some? {
                 var choice := choiceResult.Unwrap() as int;
                 expect choice < |possibilities|;
-                // result := tc.Any(possibilities[choice]);
                 result := possibilities[choice].internalFunction.Apply(tc);
             } else {
-                // result := tc.Any(possibilities[0]);
-                result := possibilities[0].internalFunction.Apply(tc);
+                // OVERRUN/INVALID: abort the draw (Hypothesis discards the example).
+                result := None;
             }
         }
     }
@@ -527,7 +526,7 @@ module Arbitraries {
             this.repr == {this} + childRepr && childRepr < this.repr
         }
 
-        method Apply(tc: TestCase) returns (result: bool)
+        method Apply(tc: TestCase) returns (result: Option<bool>)
             requires allocated(tc)
             requires this.Valid()
             requires tc.repr !! this.repr
@@ -542,9 +541,9 @@ module Arbitraries {
         {
             var choiceResult := tc.MakeChoice(2);
             if choiceResult.value.Some? {
-                result := choiceResult.Unwrap() == 1;
+                result := Some(choiceResult.Unwrap() == 1);
             } else {
-                result := false;
+                result := None;
             }
         }
     }
@@ -582,7 +581,7 @@ module Arbitraries {
             childRepr < this.repr && this.repr == {this} + childRepr
         }
 
-        method Apply(tc: TestCase) returns (result: seq<S>)
+        method Apply(tc: TestCase) returns (result: Option<seq<S>>)
             requires allocated(tc)
             requires tc.Valid()
             requires this.Valid()
@@ -597,23 +596,23 @@ module Arbitraries {
             decreases tc.maxSize - |tc.choices|, repr, childRepr
             modifies tc, tc.random
         {
-            result := [];
+            var xs: seq<S> := [];
             while true
-                invariant |result| <= maxSize
+                invariant |xs| <= maxSize
                 invariant tc.Valid()
                 invariant tc.repr == old(tc.repr)
                 invariant |tc.choices| >= old(|tc.choices|)
                 invariant tc.maxSize == old(tc.maxSize)
                 modifies tc, tc.random
-                decreases maxSize-|result|
+                decreases maxSize-|xs|
             {
-                if |result| < minSize {
+                if |xs| < minSize {
                     // Force continue
                     var forceResult := tc.ForcedChoice(1);
                     if forceResult.err.Some? {
                         break;
                     }
-                } else if |result| >= maxSize {
+                } else if |xs| >= maxSize {
                     // Force stop
                     var forceResult := tc.ForcedChoice(0);
                     if forceResult.err.Some? {
@@ -628,8 +627,10 @@ module Arbitraries {
                     }
                 }
                 var element := elementGenerator.internalFunction.Apply(tc);
-                result := result + [element];
+                if element.None? { return None; }  // element draw overran: abort
+                xs := xs + [element.value];
             }
+            result := Some(xs);
         }
     }
 
@@ -660,7 +661,7 @@ module Arbitraries {
           this in repr && 0 <= minLength <= maxLength && childRepr < this.repr && this.repr == {this} + childRepr
         }
 
-        method {:isolate_assertions} Apply(tc: TestCase) returns (result: string)
+        method {:isolate_assertions} Apply(tc: TestCase) returns (result: Option<string>)
             requires allocated(tc)
             requires tc.Valid()
             requires this.Valid()
@@ -707,17 +708,19 @@ module Arbitraries {
                 }
                 var charChoice := if ascii then 128 else 0x0000D800;
                 var choiceResult := tc.MakeChoice(charChoice as Choice);
-                var charValue := if choiceResult.value.Some? then choiceResult.Unwrap() else 0;
+                if choiceResult.value.None? { return None; }  // char draw overran: abort
+                var charValue := choiceResult.Unwrap();
                 assume {:axiom} 0 <= charValue < 0x0000D800;
                 chars := chars + [charValue as nat];
             }
-            result := "";
+            var s: string := "";
             for i := 0 to |chars|
-                invariant |result| == i
+                invariant |s| == i
             {
-                assert chars[i] in chars; 
-                result := result + [chars[i] as char];
+                assert chars[i] in chars;
+                s := s + [chars[i] as char];
             }
+            result := Some(s);
         }
     }
 
@@ -752,7 +755,7 @@ module Arbitraries {
             elementGenerator.Valid()
         }
 
-        method Apply(tc: TestCase) returns (result: T)
+        method Apply(tc: TestCase) returns (result: Option<T>)
             requires allocated(tc)
             requires tc.Valid()
             requires this.Valid()
@@ -767,7 +770,8 @@ module Arbitraries {
             modifies tc, tc.random
         {
           var element := elementGenerator.internalFunction.Apply(tc);
-          result := fn(element);
+          if element.None? { return None; }
+          result := Some(fn(element.value));
         }
     }
 
@@ -808,7 +812,7 @@ module Arbitraries {
             secondGenerator.Valid()
         }
 
-        method Apply(tc: TestCase) returns (result: (T, U))
+        method Apply(tc: TestCase) returns (result: Option<(T, U)>)
             requires allocated(tc)
             requires tc.Valid()
             requires this.Valid()
@@ -823,8 +827,10 @@ module Arbitraries {
             modifies tc, tc.random
         {
             var first := firstGenerator.internalFunction.Apply(tc);
+            if first.None? { return None; }
             var second := secondGenerator.internalFunction.Apply(tc);
-            result := (first, second);
+            if second.None? { return None; }
+            result := Some((first.value, second.value));
         }
     }
 
@@ -867,7 +873,7 @@ module Arbitraries {
             baseGenerator.Valid()
         }
 
-        method Apply(tc: TestCase) returns (result: U)
+        method Apply(tc: TestCase) returns (result: Option<U>)
             requires allocated(tc)
             requires tc.Valid()
             requires this.Valid()
@@ -882,13 +888,17 @@ module Arbitraries {
             modifies tc, tc.random
         {
             var intermediateValue := baseGenerator.internalFunction.Apply(tc); // First, generate T
-            var nextArbitrary := flatMapFn.CreateArbitrary(intermediateValue); // Then, create Arbitrary<U>
-            assert tc.repr !! nextArbitrary.internalFunction.repr; // Example assertion, might need to be required
-            // KNOWN: "decreases clause might not decrease" verification error here is expected.
-            // The repr/childRepr metric can't yet prove termination through the flatMap'd
-            // nextArbitrary. Expected to fail until the termination proof is completed (future work).
+            if intermediateValue.None? { return None; }                       // base overran: abort
+            var nextArbitrary := flatMapFn.CreateArbitrary(intermediateValue.value); // Then, create Arbitrary<U>
+            assert tc.repr !! nextArbitrary.internalFunction.repr; // fresh repr is disjoint from the pre-existing tc
+            // Draw a control marker so the buffer STRICTLY drops before dispatching into the
+            // freshly-created nextArbitrary (which is not in our repr, so repr can't break the
+            // tie). This is the finite-buffer bound: each flatMap bind consumes >= 1 choice, so
+            // the maxSize - |choices| metric decreases. On exhaustion the bind aborts (None),
+            // mirroring Hypothesis raising StopTest rather than completing an overrun draw.
+            var marker := tc.MakeChoice(2);
+            if marker.value.None? { return None; }
             result := nextArbitrary.internalFunction.Apply(tc);
-
         }
     }
 
@@ -926,7 +936,7 @@ module Arbitraries {
             0 <= minSize <= maxSize && elementGenerator.Valid() &&
             childRepr < this.repr && this.repr == {this} + childRepr
         }
-        method Apply(tc: TestCase) returns (result: array<S>)
+        method Apply(tc: TestCase) returns (result: Option<array<S>>)
             requires allocated(tc)
             requires tc.Valid()
             requires this.Valid()
@@ -962,9 +972,11 @@ module Arbitraries {
                     if !weightedResult.value.Some? || !weightedResult.Unwrap() { break; }
                 }
                 var element := elementGenerator.internalFunction.Apply(tc);
-                xs := xs + [element];
+                if element.None? { return None; }
+                xs := xs + [element.value];
             }
-            result := new S[|xs|](idx requires 0 <= idx < |xs| => xs[idx]);
+            var arr := new S[|xs|](idx requires 0 <= idx < |xs| => xs[idx]);
+            result := Some(arr);
         }
     }
 
@@ -1003,7 +1015,7 @@ module Arbitraries {
             elementGenerator.Valid() &&
             childRepr < this.repr && this.repr == {this} + childRepr
         }
-        method {:isolate_assertions} Apply(tc: TestCase) returns (result: array2<S>)
+        method {:isolate_assertions} Apply(tc: TestCase) returns (result: Option<array2<S>>)
             requires allocated(tc)
             requires tc.Valid()
             requires this.Valid()
@@ -1014,15 +1026,17 @@ module Arbitraries {
             ensures |tc.choices| >= old(|tc.choices|)
             ensures tc.maxSize == old(tc.maxSize)
             ensures this.repr == old(this.repr)
-            ensures result.Length0 == rows && result.Length1 == cols
+            ensures result.Some? ==> result.value.Length0 == rows && result.value.Length1 == cols
             decreases tc.maxSize - |tc.choices|, repr, childRepr
             modifies tc, tc.random
         {
             var m: nat := rows;
             var n: nat := cols;
             var dflt := elementGenerator.internalFunction.Apply(tc);
+            if dflt.None? { return None; }
+            var dv := dflt.value;
             var total := m * n;
-            var flat: seq<S> := [dflt];
+            var flat: seq<S> := [dv];
             while |flat| < total
                 invariant tc.Valid()
                 invariant tc.repr == old(tc.repr)
@@ -1033,9 +1047,11 @@ module Arbitraries {
                 modifies tc, tc.random
             {
                 var el := elementGenerator.internalFunction.Apply(tc);
-                flat := flat + [el];
+                if el.None? { return None; }
+                flat := flat + [el.value];
             }
-            result := new S[m, n]((i: nat, j: nat) => if i * n + j < |flat| then flat[i * n + j] else dflt);
+            var arr := new S[m, n]((i: nat, j: nat) => if i * n + j < |flat| then flat[i * n + j] else dv);
+            result := Some(arr);
         }
     }
 
@@ -1071,7 +1087,7 @@ module Arbitraries {
             elementGenerator.Valid() &&
             childRepr < this.repr && this.repr == {this} + childRepr
         }
-        method {:isolate_assertions} Apply(tc: TestCase) returns (result: array3<S>)
+        method {:isolate_assertions} Apply(tc: TestCase) returns (result: Option<array3<S>>)
             requires allocated(tc)
             requires tc.Valid()
             requires this.Valid()
@@ -1082,7 +1098,7 @@ module Arbitraries {
             ensures |tc.choices| >= old(|tc.choices|)
             ensures tc.maxSize == old(tc.maxSize)
             ensures this.repr == old(this.repr)
-            ensures result.Length0 == rows && result.Length1 == cols && result.Length2 == layers
+            ensures result.Some? ==> result.value.Length0 == rows && result.value.Length1 == cols && result.value.Length2 == layers
             decreases tc.maxSize - |tc.choices|, repr, childRepr
             modifies tc, tc.random
         {
@@ -1090,8 +1106,10 @@ module Arbitraries {
             var n: nat := cols;
             var o: nat := layers;
             var dflt := elementGenerator.internalFunction.Apply(tc);
+            if dflt.None? { return None; }
+            var dv := dflt.value;
             var total := m * n * o;
-            var flat: seq<S> := [dflt];
+            var flat: seq<S> := [dv];
             while |flat| < total
                 invariant tc.Valid()
                 invariant tc.repr == old(tc.repr)
@@ -1102,11 +1120,13 @@ module Arbitraries {
                 modifies tc, tc.random
             {
                 var el := elementGenerator.internalFunction.Apply(tc);
-                flat := flat + [el];
+                if el.None? { return None; }
+                flat := flat + [el.value];
             }
-            result := new S[m, n, o]((i: nat, j: nat, k: nat) =>
+            var arr := new S[m, n, o]((i: nat, j: nat, k: nat) =>
                 var idx := i * n * o + j * o + k;
-                if idx < |flat| then flat[idx] else dflt);
+                if idx < |flat| then flat[idx] else dv);
+            result := Some(arr);
         }
     }
 
@@ -1141,7 +1161,7 @@ module Arbitraries {
         {
             this.repr == {this} + childRepr && childRepr < this.repr && 0 < bound <= MaxChoice
         }
-        method Apply(tc: TestCase) returns (result: nat)
+        method Apply(tc: TestCase) returns (result: Option<nat>)
             requires allocated(tc)
             requires this.Valid()
             requires tc.repr !! this.repr
@@ -1156,9 +1176,9 @@ module Arbitraries {
         {
             var c := tc.MakeChoice(bound as Choice);
             if c.value.Some? {
-                result := c.Unwrap() as nat;
+                result := Some(c.Unwrap() as nat);
             } else {
-                result := 0;
+                result := None;
             }
         }
     }
@@ -1182,7 +1202,7 @@ module Arbitraries {
         {
             this.repr == {this} + childRepr && childRepr < this.repr
         }
-        method Apply(tc: TestCase) returns (result: char)
+        method Apply(tc: TestCase) returns (result: Option<char>)
             requires allocated(tc)
             requires this.Valid()
             requires tc.repr !! this.repr
@@ -1196,9 +1216,10 @@ module Arbitraries {
             modifies tc, tc.random
         {
             var c := tc.MakeChoice(95);
-            var v := if c.value.Some? then c.Unwrap() as int else 0;
+            if c.value.None? { return None; }
+            var v := c.Unwrap() as int;
             assume {:axiom} 0 <= v < 95;
-            result := (32 + v) as char;
+            result := Some((32 + v) as char);
         }
     }
 
@@ -1221,7 +1242,7 @@ module Arbitraries {
         {
             this.repr == {this} + childRepr && childRepr < this.repr
         }
-        method Apply(tc: TestCase) returns (result: real)
+        method Apply(tc: TestCase) returns (result: Option<real>)
             requires allocated(tc)
             requires this.Valid()
             requires tc.repr !! this.repr
@@ -1235,10 +1256,12 @@ module Arbitraries {
             modifies tc, tc.random
         {
             var cn := tc.MakeChoice(1000000);
-            var num := if cn.value.Some? then cn.Unwrap() as int else 0;
+            if cn.value.None? { return None; }
+            var num := cn.Unwrap() as int;
             var cd := tc.MakeChoice(1000);
-            var den := if cd.value.Some? then cd.Unwrap() as int else 0;
-            result := (num as real) / ((den + 1) as real);
+            if cd.value.None? { return None; }
+            var den := cd.Unwrap() as int;
+            result := Some((num as real) / ((den + 1) as real));
         }
     }
 
@@ -1257,7 +1280,7 @@ module Arbitraries {
             ensures Valid() ==> this.repr == {this} + childRepr
             decreases repr, childRepr, 0
         { this.repr == {this} + childRepr && childRepr < this.repr }
-        method Apply(tc: TestCase) returns (result: bv1)
+        method Apply(tc: TestCase) returns (result: Option<bv1>)
             requires allocated(tc) requires this.Valid() requires tc.repr !! this.repr
             ensures this.repr == old(this.repr)
             requires tc.Valid() ensures tc.Valid() ensures tc.repr == old(tc.repr)
@@ -1268,7 +1291,7 @@ module Arbitraries {
             var c := tc.MakeChoice(2);
             var v := if c.value.Some? then c.Unwrap() else 0;
             assume {:axiom} v < 2;
-            result := v as bv1;
+            result := Some(v as bv1);
         }
     }
 
@@ -1282,7 +1305,7 @@ module Arbitraries {
             ensures Valid() ==> this.repr == {this} + childRepr
             decreases repr, childRepr, 0
         { this.repr == {this} + childRepr && childRepr < this.repr }
-        method Apply(tc: TestCase) returns (result: bv2)
+        method Apply(tc: TestCase) returns (result: Option<bv2>)
             requires allocated(tc) requires this.Valid() requires tc.repr !! this.repr
             ensures this.repr == old(this.repr)
             requires tc.Valid() ensures tc.Valid() ensures tc.repr == old(tc.repr)
@@ -1293,7 +1316,7 @@ module Arbitraries {
             var c := tc.MakeChoice(4);
             var v := if c.value.Some? then c.Unwrap() else 0;
             assume {:axiom} v < 4;
-            result := v as bv2;
+            result := Some(v as bv2);
         }
     }
 
@@ -1307,7 +1330,7 @@ module Arbitraries {
             ensures Valid() ==> this.repr == {this} + childRepr
             decreases repr, childRepr, 0
         { this.repr == {this} + childRepr && childRepr < this.repr }
-        method Apply(tc: TestCase) returns (result: bv8)
+        method Apply(tc: TestCase) returns (result: Option<bv8>)
             requires allocated(tc) requires this.Valid() requires tc.repr !! this.repr
             ensures this.repr == old(this.repr)
             requires tc.Valid() ensures tc.Valid() ensures tc.repr == old(tc.repr)
@@ -1318,7 +1341,7 @@ module Arbitraries {
             var c := tc.MakeChoice(256);
             var v := if c.value.Some? then c.Unwrap() else 0;
             assume {:axiom} v < 256;
-            result := v as bv8;
+            result := Some(v as bv8);
         }
     }
 
@@ -1332,7 +1355,7 @@ module Arbitraries {
             ensures Valid() ==> this.repr == {this} + childRepr
             decreases repr, childRepr, 0
         { this.repr == {this} + childRepr && childRepr < this.repr }
-        method Apply(tc: TestCase) returns (result: bv16)
+        method Apply(tc: TestCase) returns (result: Option<bv16>)
             requires allocated(tc) requires this.Valid() requires tc.repr !! this.repr
             ensures this.repr == old(this.repr)
             requires tc.Valid() ensures tc.Valid() ensures tc.repr == old(tc.repr)
@@ -1343,7 +1366,7 @@ module Arbitraries {
             var c := tc.MakeChoice(0x10000);
             var v := if c.value.Some? then c.Unwrap() else 0;
             assume {:axiom} v < 0x10000;
-            result := v as bv16;
+            result := Some(v as bv16);
         }
     }
 
@@ -1357,7 +1380,7 @@ module Arbitraries {
             ensures Valid() ==> this.repr == {this} + childRepr
             decreases repr, childRepr, 0
         { this.repr == {this} + childRepr && childRepr < this.repr }
-        method Apply(tc: TestCase) returns (result: bv32)
+        method Apply(tc: TestCase) returns (result: Option<bv32>)
             requires allocated(tc) requires this.Valid() requires tc.repr !! this.repr
             ensures this.repr == old(this.repr)
             requires tc.Valid() ensures tc.Valid() ensures tc.repr == old(tc.repr)
@@ -1372,7 +1395,7 @@ module Arbitraries {
             var w0 := if c0.value.Some? then c0.Unwrap() else 0;
             var c1 := tc.MakeChoice(0x10000);
             var w1 := if c1.value.Some? then c1.Unwrap() else 0;
-            result := ((w0 as bv32) << 16) | (w1 as bv32);
+            result := Some(((w0 as bv32) << 16) | (w1 as bv32));
         }
     }
 
@@ -1386,7 +1409,7 @@ module Arbitraries {
             ensures Valid() ==> this.repr == {this} + childRepr
             decreases repr, childRepr, 0
         { this.repr == {this} + childRepr && childRepr < this.repr }
-        method Apply(tc: TestCase) returns (result: bv64)
+        method Apply(tc: TestCase) returns (result: Option<bv64>)
             requires allocated(tc) requires this.Valid() requires tc.repr !! this.repr
             ensures this.repr == old(this.repr)
             requires tc.Valid() ensures tc.Valid() ensures tc.repr == old(tc.repr)
@@ -1403,8 +1426,8 @@ module Arbitraries {
             var w2 := if c2.value.Some? then c2.Unwrap() else 0;
             var c3 := tc.MakeChoice(0x10000);
             var w3 := if c3.value.Some? then c3.Unwrap() else 0;
-            result := ((w0 as bv64) << 48) | ((w1 as bv64) << 32) |
-                      ((w2 as bv64) << 16) | (w3 as bv64);
+            result := Some(((w0 as bv64) << 48) | ((w1 as bv64) << 32) |
+                      ((w2 as bv64) << 16) | (w3 as bv64));
         }
     }
 
@@ -1418,7 +1441,7 @@ module Arbitraries {
             ensures Valid() ==> this.repr == {this} + childRepr
             decreases repr, childRepr, 0
         { this.repr == {this} + childRepr && childRepr < this.repr }
-        method Apply(tc: TestCase) returns (result: bv128)
+        method Apply(tc: TestCase) returns (result: Option<bv128>)
             requires allocated(tc) requires this.Valid() requires tc.repr !! this.repr
             ensures this.repr == old(this.repr)
             requires tc.Valid() ensures tc.Valid() ensures tc.repr == old(tc.repr)
@@ -1443,10 +1466,10 @@ module Arbitraries {
             var w6 := if c6.value.Some? then c6.Unwrap() else 0;
             var c7 := tc.MakeChoice(0x10000);
             var w7 := if c7.value.Some? then c7.Unwrap() else 0;
-            result := ((w0 as bv128) << 112) | ((w1 as bv128) << 96) |
+            result := Some(((w0 as bv128) << 112) | ((w1 as bv128) << 96) |
                       ((w2 as bv128) << 80)  | ((w3 as bv128) << 64) |
                       ((w4 as bv128) << 48)  | ((w5 as bv128) << 32) |
-                      ((w6 as bv128) << 16)  | (w7 as bv128);
+                      ((w6 as bv128) << 16)  | (w7 as bv128));
         }
     }
 
@@ -1460,7 +1483,7 @@ module Arbitraries {
             ensures Valid() ==> this.repr == {this} + childRepr
             decreases repr, childRepr, 0
         { this.repr == {this} + childRepr && childRepr < this.repr }
-        method Apply(tc: TestCase) returns (result: bv256)
+        method Apply(tc: TestCase) returns (result: Option<bv256>)
             requires allocated(tc) requires this.Valid() requires tc.repr !! this.repr
             ensures this.repr == old(this.repr)
             requires tc.Valid() ensures tc.Valid() ensures tc.repr == old(tc.repr)
@@ -1485,14 +1508,14 @@ module Arbitraries {
             var c13 := tc.MakeChoice(0x10000); var w13 := if c13.value.Some? then c13.Unwrap() else 0;
             var c14 := tc.MakeChoice(0x10000); var w14 := if c14.value.Some? then c14.Unwrap() else 0;
             var c15 := tc.MakeChoice(0x10000); var w15 := if c15.value.Some? then c15.Unwrap() else 0;
-            result := ((w0 as bv256) << 240)  | ((w1 as bv256) << 224) |
+            result := Some(((w0 as bv256) << 240)  | ((w1 as bv256) << 224) |
                       ((w2 as bv256) << 208)  | ((w3 as bv256) << 192) |
                       ((w4 as bv256) << 176)  | ((w5 as bv256) << 160) |
                       ((w6 as bv256) << 144)  | ((w7 as bv256) << 128) |
                       ((w8 as bv256) << 112)  | ((w9 as bv256) << 96)  |
                       ((w10 as bv256) << 80)  | ((w11 as bv256) << 64)  |
                       ((w12 as bv256) << 48)  | ((w13 as bv256) << 32)  |
-                      ((w14 as bv256) << 16)  | (w15 as bv256);
+                      ((w14 as bv256) << 16)  | (w15 as bv256));
         }
     }
 
@@ -1597,7 +1620,7 @@ module Arbitraries {
             this.repr == {this} + childRepr && childRepr < this.repr
         }
 
-        method Apply(tc: TestCase) returns (result: T)
+        method Apply(tc: TestCase) returns (result: Option<T>)
             requires allocated(tc)
             requires this.Valid()
             requires tc.repr !! this.repr
@@ -1611,8 +1634,17 @@ module Arbitraries {
             modifies tc, tc.random
         {
             var d0 := tc.depth;
+            // Draw a control marker so the buffer STRICTLY drops before dispatching into
+            // the registry target (not in our repr, so repr can't break the decreases tie).
+            // Finite-buffer bound: each recursive expansion consumes >= 1 choice, so the
+            // maxSize - |choices| metric decreases through the letrec cycle. On exhaustion
+            // the expansion aborts (None), mirroring Hypothesis raising StopTest. The
+            // depth/maxDepth budget still steers recursion toward the base case (the
+            // max_leaves analog), but termination now rests on the buffer, not the budget.
+            var marker := tc.MakeChoice(2);
+            if marker.value.None? { return None; }
             // At the depth budget, force the registry's base case (must be
-            // non-recursive) so generation terminates; otherwise descend one level.
+            // non-recursive); otherwise descend one level.
             var useBase := d0 >= registry.maxDepth;
             var k := if useBase then registry.baseKey else key;
             // Framing axioms: the named arbitrary exists and is well-formed, and a
@@ -1624,10 +1656,6 @@ module Arbitraries {
             if !useBase {
                 tc.depth := d0 + 1;
             }
-            // KNOWN: "decreases clause might not decrease" here is expected â€” through
-            // the registry this dispatches back into LazyArbitrary.Apply (the letrec
-            // cycle), which the trait's repr-based metric can't reconcile. Termination
-            // is enforced at runtime by the `depth`/maxDepth budget above. Future work.
             result := target.internalFunction.Apply(tc);
             tc.depth := d0;  // restore so siblings recurse to the same budget
         }
@@ -1644,7 +1672,7 @@ module Arbitraries {
             this.internalFunction.Valid()
         }
 
-        method Apply(tc: TestCase) returns (result: T)
+        method Apply(tc: TestCase) returns (result: Option<T>)
             requires tc.Valid()
             requires this.Valid()
             requires tc.repr !! this.internalFunction.repr

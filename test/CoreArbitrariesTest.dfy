@@ -1,4 +1,4 @@
-include "../src/Arbitrary.dfy"
+﻿include "../src/Arbitrary.dfy"
 include "../src/RandomGenerator.dfy"
 
 // Backfilled tests for the core arbitraries added in the release work:
@@ -6,7 +6,7 @@ include "../src/RandomGenerator.dfy"
 // and the (fixed-size) Arrays/Array2/Array3. Each test builds the generator first
 // (so the freshly-created TestCase is disjoint from it), applies it, and asserts
 // the generated value conforms to its expected type and bounds with `expect`
-// (runtime checks — MakeChoice has no proven static upper bound).
+// (runtime checks â€” MakeChoice has no proven static upper bound).
 module CoreArbitrariesTest {
   import opened Arbitraries
   import opened RandomGenerator
@@ -17,8 +17,8 @@ module CoreArbitrariesTest {
     var arb := Arbitrary<nat>.Nats(100);
     var rng := XoroShift128Plus.fromSeed(42);
     var tc := new TestCase([], rng, 100, true);
-    var r1 := arb.Apply(tc);
-    var r2 := arb.Apply(tc);
+    var r1_o := arb.Apply(tc); expect r1_o.Some?; var r1 := r1_o.value;
+    var r2_o := arb.Apply(tc); expect r2_o.Some?; var r2 := r2_o.value;
     expect r1 < 100 && r2 < 100;
     print "Nats: ", r1, " ", r2, "\n";
   }
@@ -27,8 +27,8 @@ module CoreArbitrariesTest {
     var arb := Arbitrary<char>.Chars();
     var rng := XoroShift128Plus.fromSeed(42);
     var tc := new TestCase([], rng, 100, true);
-    var r1 := arb.Apply(tc);
-    var r2 := arb.Apply(tc);
+    var r1_o := arb.Apply(tc); expect r1_o.Some?; var r1 := r1_o.value;
+    var r2_o := arb.Apply(tc); expect r2_o.Some?; var r2 := r2_o.value;
     expect 32 <= r1 as int < 127;
     expect 32 <= r2 as int < 127;
     print "Chars: ", r1, " ", r2, "\n";
@@ -38,8 +38,8 @@ module CoreArbitrariesTest {
     var arb := Arbitrary<real>.Reals();
     var rng := XoroShift128Plus.fromSeed(42);
     var tc := new TestCase([], rng, 100, true);
-    var r1 := arb.Apply(tc);
-    var r2 := arb.Apply(tc);
+    var r1_o := arb.Apply(tc); expect r1_o.Some?; var r1 := r1_o.value;
+    var r2_o := arb.Apply(tc); expect r2_o.Some?; var r2 := r2_o.value;
     expect r1 >= 0.0 && r2 >= 0.0;
     print "Reals: ", r1, " ", r2, "\n";
   }
@@ -57,14 +57,14 @@ module CoreArbitrariesTest {
     var a64 := Arbitrary<bv64>.BitVectors64();
     var a128 := Arbitrary<bv128>.BitVectors128();
     var a256 := Arbitrary<bv256>.BitVectors256();
-    var v1 := a1.Apply(tc);
-    var v2 := a2.Apply(tc);
-    var v8 := a8.Apply(tc);
-    var v16 := a16.Apply(tc);
-    var v32 := a32.Apply(tc);
-    var v64 := a64.Apply(tc);
-    var v128 := a128.Apply(tc);
-    var v256 := a256.Apply(tc);
+    var v1_o := a1.Apply(tc); expect v1_o.Some?; var v1 := v1_o.value;
+    var v2_o := a2.Apply(tc); expect v2_o.Some?; var v2 := v2_o.value;
+    var v8_o := a8.Apply(tc); expect v8_o.Some?; var v8 := v8_o.value;
+    var v16_o := a16.Apply(tc); expect v16_o.Some?; var v16 := v16_o.value;
+    var v32_o := a32.Apply(tc); expect v32_o.Some?; var v32 := v32_o.value;
+    var v64_o := a64.Apply(tc); expect v64_o.Some?; var v64 := v64_o.value;
+    var v128_o := a128.Apply(tc); expect v128_o.Some?; var v128 := v128_o.value;
+    var v256_o := a256.Apply(tc); expect v256_o.Some?; var v256 := v256_o.value;
     // Each value's width is guaranteed by its type; confirm generation ran.
     expect v1 as int >= 0 && v2 as int >= 0 && v8 as int >= 0 && v256 as int >= 0;
     print "BitVectors: ", v1, " ", v2, " ", v8, " ", v16, " ", v32, " ", v64, " ", v128, " ", v256, "\n";
@@ -77,7 +77,7 @@ module CoreArbitrariesTest {
     var arb := Arbitrary<int>.Sets(elem, 0, 5);
     var rng := XoroShift128Plus.fromSeed(42);
     var tc := new TestCase([], rng, 100, true);
-    var s := arb.Apply(tc);
+    var s_o := arb.Apply(tc); expect s_o.Some?; var s := s_o.value;
     expect |s| <= 5;
     expect forall x :: x in s ==> 0 <= x < 10;
     print "Set: ", s, "\n";
@@ -88,7 +88,7 @@ module CoreArbitrariesTest {
     var arb := Arbitrary<int>.Multisets(elem, 0, 5);
     var rng := XoroShift128Plus.fromSeed(42);
     var tc := new TestCase([], rng, 100, true);
-    var m := arb.Apply(tc);
+    var m_o := arb.Apply(tc); expect m_o.Some?; var m := m_o.value;
     expect |m| <= 5;
     expect forall x :: x in m ==> 0 <= x < 10;
     print "Multiset: ", m, "\n";
@@ -100,7 +100,7 @@ module CoreArbitrariesTest {
     var arb := Arbitrary<int>.Maps(keys, vals, 0, 5);
     var rng := XoroShift128Plus.fromSeed(42);
     var tc := new TestCase([], rng, 100, true);
-    var m := arb.Apply(tc);
+    var m_o := arb.Apply(tc); expect m_o.Some?; var m := m_o.value;
     expect |m| <= 5;
     expect forall k :: k in m ==> 0 <= k < 10 && 0 <= m[k] < 20;
     print "Map: ", m, "\n";
@@ -113,7 +113,7 @@ module CoreArbitrariesTest {
     var arb := Arbitrary<int>.Arrays(elem, 0, 5);
     var rng := XoroShift128Plus.fromSeed(42);
     var tc := new TestCase([], rng, 100, true);
-    var a := arb.Apply(tc);
+    var a_o := arb.Apply(tc); expect a_o.Some?; var a := a_o.value;
     expect a.Length <= 5;
     expect forall i :: 0 <= i < a.Length ==> 0 <= a[i] < 10;
     print "Array length: ", a.Length, "\n";
@@ -124,7 +124,7 @@ module CoreArbitrariesTest {
     var arb := Arbitrary<int>.Array2(elem, 3, 4);
     var rng := XoroShift128Plus.fromSeed(42);
     var tc := new TestCase([], rng, 100, true);
-    var a := arb.Apply(tc);
+    var a_o := arb.Apply(tc); expect a_o.Some?; var a := a_o.value;
     expect a.Length0 == 3 && a.Length1 == 4;
     expect forall i, j :: 0 <= i < a.Length0 && 0 <= j < a.Length1 ==> 0 <= a[i, j] < 10;
     print "Array2 dims: ", a.Length0, "x", a.Length1, "\n";
@@ -135,7 +135,7 @@ module CoreArbitrariesTest {
     var arb := Arbitrary<int>.Array3(elem, 2, 3, 2);
     var rng := XoroShift128Plus.fromSeed(42);
     var tc := new TestCase([], rng, 100, true);
-    var a := arb.Apply(tc);
+    var a_o := arb.Apply(tc); expect a_o.Some?; var a := a_o.value;
     expect a.Length0 == 2 && a.Length1 == 3 && a.Length2 == 2;
     print "Array3 dims: ", a.Length0, "x", a.Length1, "x", a.Length2, "\n";
   }
@@ -149,7 +149,7 @@ module CoreArbitrariesTest {
     var arb := Arbitrary<int>.Tuple3(g0, g1, g2);
     var rng := XoroShift128Plus.fromSeed(42);
     var tc := new TestCase([], rng, 100, true);
-    var t := arb.Apply(tc);
+    var t_o := arb.Apply(tc); expect t_o.Some?; var t := t_o.value;
     expect 0 <= t.0 < 10 && 0 <= t.1 < 10 && 0 <= t.2 < 10;
     print "Tuple3: ", t, "\n";
   }
@@ -162,7 +162,7 @@ module CoreArbitrariesTest {
     var arb := Arbitrary<int>.Tuple4(g0, g1, g2, g3);
     var rng := XoroShift128Plus.fromSeed(42);
     var tc := new TestCase([], rng, 100, true);
-    var t := arb.Apply(tc);
+    var t_o := arb.Apply(tc); expect t_o.Some?; var t := t_o.value;
     expect 0 <= t.0 < 10 && 0 <= t.3 < 10;
     print "Tuple4: ", t, "\n";
   }
@@ -176,7 +176,7 @@ module CoreArbitrariesTest {
     var arb := Arbitrary<int>.Tuple5(g0, g1, g2, g3, g4);
     var rng := XoroShift128Plus.fromSeed(42);
     var tc := new TestCase([], rng, 100, true);
-    var t := arb.Apply(tc);
+    var t_o := arb.Apply(tc); expect t_o.Some?; var t := t_o.value;
     expect 0 <= t.0 < 10 && 0 <= t.4 < 10;
     print "Tuple5: ", t, "\n";
   }
@@ -191,7 +191,7 @@ module CoreArbitrariesTest {
     var arb := Arbitrary<int>.Tuple6(g0, g1, g2, g3, g4, g5);
     var rng := XoroShift128Plus.fromSeed(42);
     var tc := new TestCase([], rng, 100, true);
-    var t := arb.Apply(tc);
+    var t_o := arb.Apply(tc); expect t_o.Some?; var t := t_o.value;
     expect 0 <= t.0 < 10 && 0 <= t.5 < 10;
     print "Tuple6: ", t, "\n";
   }
@@ -207,7 +207,7 @@ module CoreArbitrariesTest {
     var arb := Arbitrary<int>.Tuple7(g0, g1, g2, g3, g4, g5, g6);
     var rng := XoroShift128Plus.fromSeed(42);
     var tc := new TestCase([], rng, 100, true);
-    var t := arb.Apply(tc);
+    var t_o := arb.Apply(tc); expect t_o.Some?; var t := t_o.value;
     expect 0 <= t.0 < 10 && 0 <= t.6 < 10;
     print "Tuple7: ", t, "\n";
   }
@@ -224,7 +224,7 @@ module CoreArbitrariesTest {
     var arb := Arbitrary<int>.Tuple8(g0, g1, g2, g3, g4, g5, g6, g7);
     var rng := XoroShift128Plus.fromSeed(42);
     var tc := new TestCase([], rng, 100, true);
-    var t := arb.Apply(tc);
+    var t_o := arb.Apply(tc); expect t_o.Some?; var t := t_o.value;
     expect 0 <= t.0 < 10 && 0 <= t.7 < 10;
     print "Tuple8: ", t, "\n";
   }
@@ -242,7 +242,7 @@ module CoreArbitrariesTest {
     var arb := Arbitrary<int>.Tuple9(g0, g1, g2, g3, g4, g5, g6, g7, g8);
     var rng := XoroShift128Plus.fromSeed(42);
     var tc := new TestCase([], rng, 100, true);
-    var t := arb.Apply(tc);
+    var t_o := arb.Apply(tc); expect t_o.Some?; var t := t_o.value;
     expect 0 <= t.0 < 10 && 0 <= t.8 < 10;
     print "Tuple9: ", t, "\n";
   }
@@ -261,7 +261,7 @@ module CoreArbitrariesTest {
     var arb := Arbitrary<int>.Tuple10(g0, g1, g2, g3, g4, g5, g6, g7, g8, g9);
     var rng := XoroShift128Plus.fromSeed(42);
     var tc := new TestCase([], rng, 100, true);
-    var t := arb.Apply(tc);
+    var t_o := arb.Apply(tc); expect t_o.Some?; var t := t_o.value;
     expect 0 <= t.0 < 10 && 0 <= t.9 < 10;
     print "Tuple10: ", t, "\n";
   }

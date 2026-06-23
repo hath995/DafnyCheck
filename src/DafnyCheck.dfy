@@ -79,7 +79,13 @@ module DafnyCheck {
       // arb.internalFunction.repr !! tc.repr for free.
       assert arb.internalFunction.repr <= this.repr;
       assert arb.internalFunction.repr !! tc.repr;
-      var v := arb.Apply(tc);
+      var ov := arb.Apply(tc);
+      if ov.None? {
+        // Generation overran the choice buffer: discard this example (Hypothesis StopTest).
+        result := new TestResult<T>(Some(OVERRUN), None);
+        return;
+      }
+      var v := ov.value;
       if pred(v) {
         result := new TestResult<T>(None, Some(v));
       } else {
@@ -156,7 +162,13 @@ module DafnyCheck {
     {
       assert arb.internalFunction.repr <= this.repr;
       assert arb.internalFunction.repr !! tc.repr;
-      var v := arb.Apply(tc);
+      var ov := arb.Apply(tc);
+      if ov.None? {
+        // Generation overran the choice buffer: discard this example (Hypothesis StopTest).
+        result := new TestResult<Input>(Some(OVERRUN), None);
+        return;
+      }
+      var v := ov.value;
       var mr := sut.run(v);
       this.lastResult := Some(mr);
       match mr {

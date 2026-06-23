@@ -158,7 +158,9 @@ abstract module StatefulModelTest {
       {
         assert cmds.internalFunction.repr <= this.repr;
         assert cmds.internalFunction.repr !! tc.repr;
-        var cmd := tc.Any(cmds);
+        var ocmd := tc.Any(cmds);
+        if ocmd.None? { break; }  // choice buffer exhausted: stop drawing commands
+        var cmd := ocmd.value;
         if Check(cmd, m) {
           // Mutate the system in place (footprint may grow with fresh objects),
           // then sample it back into a model.

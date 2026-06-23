@@ -1,4 +1,4 @@
-include "../src/Arbitrary.dfy"
+﻿include "../src/Arbitrary.dfy"
 include "../src/RandomGenerator.dfy"
 
 // letrec example with a VARIABLE-arity recursive node:
@@ -59,9 +59,9 @@ module RecursiveTest {
     var arb := BuildTree();
     var rng := XoroShift128Plus.fromSeed(42);
     var tc := new TestCase([], rng, 1000, true);
-    var t0 := arb.Apply(tc);
-    var t1 := arb.Apply(tc);
-    var t2 := arb.Apply(tc);
+    var t0_o := arb.Apply(tc); expect t0_o.Some?; var t0 := t0_o.value;
+    var t1_o := arb.Apply(tc); expect t1_o.Some?; var t1 := t1_o.value;
+    var t2_o := arb.Apply(tc); expect t2_o.Some?; var t2 := t2_o.value;
     // A node's arity is capped at the Lists max (3).
     expect t0.Node? ==> |t0.kids| <= 3;
     expect t1.Node? ==> |t1.kids| <= 3;

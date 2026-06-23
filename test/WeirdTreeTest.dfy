@@ -1,4 +1,4 @@
-include "../src/Arbitrary.dfy"
+﻿include "../src/Arbitrary.dfy"
 include "../src/RandomGenerator.dfy"
 
 // letrec-style recursive generator for a datatype with FOUR node types of
@@ -99,12 +99,12 @@ module WeirdTreeTest {
     var rng := XoroShift128Plus.fromSeed(99);
     var tc := new TestCase([], rng, 1000, true);
     // Draw several samples; the depth budget guarantees each one terminates.
-    var t0 := arb.Apply(tc);
-    var t1 := arb.Apply(tc);
-    var t2 := arb.Apply(tc);
-    var t3 := arb.Apply(tc);
-    var t4 := arb.Apply(tc);
-    var t5 := arb.Apply(tc);
+    var t0_o := arb.Apply(tc); expect t0_o.Some?; var t0 := t0_o.value;
+    var t1_o := arb.Apply(tc); expect t1_o.Some?; var t1 := t1_o.value;
+    var t2_o := arb.Apply(tc); expect t2_o.Some?; var t2 := t2_o.value;
+    var t3_o := arb.Apply(tc); expect t3_o.Some?; var t3 := t3_o.value;
+    var t4_o := arb.Apply(tc); expect t4_o.Some?; var t4 := t4_o.value;
+    var t5_o := arb.Apply(tc); expect t5_o.Some?; var t5 := t5_o.value;
     expect Size(t0) >= 1 && Size(t1) >= 1 && Size(t2) >= 1;
     expect Size(t3) >= 1 && Size(t4) >= 1 && Size(t5) >= 1;
     print "WeirdTree samples:\n";

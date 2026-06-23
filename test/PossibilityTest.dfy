@@ -1,4 +1,4 @@
-include "../src/Arbitrary.dfy"
+﻿include "../src/Arbitrary.dfy"
 include "../src/RandomGenerator.dfy"
 
 module PossibilityTest {
@@ -17,11 +17,11 @@ module PossibilityTest {
         assert (boolArb.internalFunction.Valid());
         assert tc.repr !! boolArb.internalFunction.repr;
 
-        var res1 := boolArb.Apply(tc);
-        var res2 := boolArb.Apply(tc);
-        var res3 := boolArb.Apply(tc);
-        var res4 := boolArb.Apply(tc);
-        var res5 := boolArb.Apply(tc);
+        var res1_o := boolArb.Apply(tc); expect res1_o.Some?; var res1 := res1_o.value;
+        var res2_o := boolArb.Apply(tc); expect res2_o.Some?; var res2 := res2_o.value;
+        var res3_o := boolArb.Apply(tc); expect res3_o.Some?; var res3 := res3_o.value;
+        var res4_o := boolArb.Apply(tc); expect res4_o.Some?; var res4 := res4_o.value;
+        var res5_o := boolArb.Apply(tc); expect res5_o.Some?; var res5 := res5_o.value;
         print "\nres1, ", res1, "\n";
         print "res2, ", res2, "\n";
         print "res3, ", res3, "\n";
@@ -35,11 +35,11 @@ module PossibilityTest {
         var tc := new TestCase([], rng, 100, true);
         var ofArb := Arbitrary<int>.Of([10, 20, 30, 40, 50]);
 
-        var res1 := ofArb.Apply(tc);
-        var res2 := ofArb.Apply(tc);
-        var res3 := ofArb.Apply(tc);
-        var res4 := ofArb.Apply(tc);
-        var res5 := ofArb.Apply(tc);
+        var res1_o := ofArb.Apply(tc); expect res1_o.Some?; var res1 := res1_o.value;
+        var res2_o := ofArb.Apply(tc); expect res2_o.Some?; var res2 := res2_o.value;
+        var res3_o := ofArb.Apply(tc); expect res3_o.Some?; var res3 := res3_o.value;
+        var res4_o := ofArb.Apply(tc); expect res4_o.Some?; var res4 := res4_o.value;
+        var res5_o := ofArb.Apply(tc); expect res5_o.Some?; var res5 := res5_o.value;
         print "\nOf res1, ", res1, "\n";
         print "Of res2, ", res2, "\n";
         print "Of res3, ", res3, "\n";
@@ -53,11 +53,11 @@ module PossibilityTest {
         var tc := new TestCase([], rng, 100, true);
         var justArb := Arbitrary<string>.Just("Hello World");
 
-        var res1 := justArb.Apply(tc);
-        var res2 := justArb.Apply(tc);
-        var res3 := justArb.Apply(tc);
-        var res4 := justArb.Apply(tc);
-        var res5 := justArb.Apply(tc);
+        var res1_o := justArb.Apply(tc); expect res1_o.Some?; var res1 := res1_o.value;
+        var res2_o := justArb.Apply(tc); expect res2_o.Some?; var res2 := res2_o.value;
+        var res3_o := justArb.Apply(tc); expect res3_o.Some?; var res3 := res3_o.value;
+        var res4_o := justArb.Apply(tc); expect res4_o.Some?; var res4 := res4_o.value;
+        var res5_o := justArb.Apply(tc); expect res5_o.Some?; var res5 := res5_o.value;
         print "\nJust res1, ", res1, "\n";
         print "Just res2, ", res2, "\n";
         print "Just res3, ", res3, "\n";
@@ -71,11 +71,11 @@ module PossibilityTest {
         var tc := new TestCase([], rng, 100, true);
         var rangeArb := Arbitrary<int>.Range(5, 15);
 
-        var res1 := rangeArb.Apply(tc);
-        var res2 := rangeArb.Apply(tc);
-        var res3 := rangeArb.Apply(tc);
-        var res4 := rangeArb.Apply(tc);
-        var res5 := rangeArb.Apply(tc);
+        var res1_o := rangeArb.Apply(tc); expect res1_o.Some?; var res1 := res1_o.value;
+        var res2_o := rangeArb.Apply(tc); expect res2_o.Some?; var res2 := res2_o.value;
+        var res3_o := rangeArb.Apply(tc); expect res3_o.Some?; var res3 := res3_o.value;
+        var res4_o := rangeArb.Apply(tc); expect res4_o.Some?; var res4 := res4_o.value;
+        var res5_o := rangeArb.Apply(tc); expect res5_o.Some?; var res5 := res5_o.value;
         // Each generated value must lie within the requested [5, 15) range.
         expect 5 <= res1 < 15;
         expect 5 <= res2 < 15;
@@ -100,11 +100,11 @@ module PossibilityTest {
         // assert listsArb.internalFunction.repr == {listsArb.internalFunction}+elementArb.internalFunction.repr;
         // assert fresh(listsArb.internalFunction.repr);
 
-        var res1 := listsArb.Apply(tc);
-        var res2 := listsArb.Apply(tc);
-        var res3 := listsArb.Apply(tc);
-        var res4 := listsArb.Apply(tc);
-        var res5 := listsArb.Apply(tc);
+        var res1_o := listsArb.Apply(tc); expect res1_o.Some?; var res1 := res1_o.value;
+        var res2_o := listsArb.Apply(tc); expect res2_o.Some?; var res2 := res2_o.value;
+        var res3_o := listsArb.Apply(tc); expect res3_o.Some?; var res3 := res3_o.value;
+        var res4_o := listsArb.Apply(tc); expect res4_o.Some?; var res4 := res4_o.value;
+        var res5_o := listsArb.Apply(tc); expect res5_o.Some?; var res5 := res5_o.value;
         // Length within [1, 10]; every element within the element generator's [1, 11).
         expect 1 <= |res1| <= 10;
         expect 1 <= |res2| <= 10;
@@ -123,11 +123,11 @@ module PossibilityTest {
         var tc := new TestCase([], rng, 100, true);
         var stringsArb := Arbitrary<string>.Strings(0, 8, true); // ASCII strings of length 3-8
 
-        var res1 := stringsArb.Apply(tc);
-        var res2 := stringsArb.Apply(tc);
-        var res3 := stringsArb.Apply(tc);
-        var res4 := stringsArb.Apply(tc);
-        var res5 := stringsArb.Apply(tc);
+        var res1_o := stringsArb.Apply(tc); expect res1_o.Some?; var res1 := res1_o.value;
+        var res2_o := stringsArb.Apply(tc); expect res2_o.Some?; var res2 := res2_o.value;
+        var res3_o := stringsArb.Apply(tc); expect res3_o.Some?; var res3 := res3_o.value;
+        var res4_o := stringsArb.Apply(tc); expect res4_o.Some?; var res4 := res4_o.value;
+        var res5_o := stringsArb.Apply(tc); expect res5_o.Some?; var res5 := res5_o.value;
         // Length within the requested [0, 8] bound.
         expect |res1| <= 8;
         expect |res2| <= 8;
@@ -146,11 +146,11 @@ module PossibilityTest {
         var intArb := Arbitrary<int>.Range(1, 11); // Range 1-10 inclusive
         var mappedArb := intArb.Map<int>((x) => x * 2); // Double the values
 
-        var res1 := mappedArb.Apply(tc);
-        var res2 := mappedArb.Apply(tc);
-        var res3 := mappedArb.Apply(tc);
-        var res4 := mappedArb.Apply(tc);
-        var res5 := mappedArb.Apply(tc);
+        var res1_o := mappedArb.Apply(tc); expect res1_o.Some?; var res1 := res1_o.value;
+        var res2_o := mappedArb.Apply(tc); expect res2_o.Some?; var res2 := res2_o.value;
+        var res3_o := mappedArb.Apply(tc); expect res3_o.Some?; var res3 := res3_o.value;
+        var res4_o := mappedArb.Apply(tc); expect res4_o.Some?; var res4 := res4_o.value;
+        var res5_o := mappedArb.Apply(tc); expect res5_o.Some?; var res5 := res5_o.value;
         // Range(1,11) doubled => even values within [2, 20].
         expect 2 <= res1 <= 20 && res1 % 2 == 0;
         expect 2 <= res2 <= 20 && res2 % 2 == 0;
@@ -168,11 +168,11 @@ module PossibilityTest {
         var stringArb := Arbitrary<string>.Strings(3, 8, true); // ASCII strings of length 3-8
         var mappedArb := stringArb.Map<string>((s) => s + "!"); // Add exclamation mark
 
-        var res1 := mappedArb.Apply(tc);
-        var res2 := mappedArb.Apply(tc);
-        var res3 := mappedArb.Apply(tc);
-        var res4 := mappedArb.Apply(tc);
-        var res5 := mappedArb.Apply(tc);
+        var res1_o := mappedArb.Apply(tc); expect res1_o.Some?; var res1 := res1_o.value;
+        var res2_o := mappedArb.Apply(tc); expect res2_o.Some?; var res2 := res2_o.value;
+        var res3_o := mappedArb.Apply(tc); expect res3_o.Some?; var res3 := res3_o.value;
+        var res4_o := mappedArb.Apply(tc); expect res4_o.Some?; var res4 := res4_o.value;
+        var res5_o := mappedArb.Apply(tc); expect res5_o.Some?; var res5 := res5_o.value;
         print "\nMap String Transform res1, ", res1, "\n";
         print "Map String Transform res2, ", res2, "\n";
         print "Map String Transform res3, ", res3, "\n";
@@ -187,11 +187,11 @@ module PossibilityTest {
         var boolArb := Arbitrary<bool>.Bools();
         var mappedArb := boolArb.Map<bool>((b) => !b); // Negate the boolean
 
-        var res1 := mappedArb.Apply(tc);
-        var res2 := mappedArb.Apply(tc);
-        var res3 := mappedArb.Apply(tc);
-        var res4 := mappedArb.Apply(tc);
-        var res5 := mappedArb.Apply(tc);
+        var res1_o := mappedArb.Apply(tc); expect res1_o.Some?; var res1 := res1_o.value;
+        var res2_o := mappedArb.Apply(tc); expect res2_o.Some?; var res2 := res2_o.value;
+        var res3_o := mappedArb.Apply(tc); expect res3_o.Some?; var res3 := res3_o.value;
+        var res4_o := mappedArb.Apply(tc); expect res4_o.Some?; var res4 := res4_o.value;
+        var res5_o := mappedArb.Apply(tc); expect res5_o.Some?; var res5 := res5_o.value;
         print "\nMap Bool Transform res1, ", res1, "\n";
         print "Map Bool Transform res2, ", res2, "\n";
         print "Map Bool Transform res3, ", res3, "\n";
@@ -206,11 +206,11 @@ module PossibilityTest {
         var intArb := Arbitrary<int>.Range(1, 6); // Range 1-5 inclusive
         var mappedArb := intArb.Map<string>((x) => "Number"+OfInt(x)); // Convert to constant string
 
-        var res1 := mappedArb.Apply(tc);
-        var res2 := mappedArb.Apply(tc);
-        var res3 := mappedArb.Apply(tc);
-        var res4 := mappedArb.Apply(tc);
-        var res5 := mappedArb.Apply(tc);
+        var res1_o := mappedArb.Apply(tc); expect res1_o.Some?; var res1 := res1_o.value;
+        var res2_o := mappedArb.Apply(tc); expect res2_o.Some?; var res2 := res2_o.value;
+        var res3_o := mappedArb.Apply(tc); expect res3_o.Some?; var res3 := res3_o.value;
+        var res4_o := mappedArb.Apply(tc); expect res4_o.Some?; var res4 := res4_o.value;
+        var res5_o := mappedArb.Apply(tc); expect res5_o.Some?; var res5 := res5_o.value;
         print "\nMap Int to String res1, ", res1, "\n";
         print "Map Int to String res2, ", res2, "\n";
         print "Map Int to String res3, ", res3, "\n";
@@ -227,11 +227,11 @@ module PossibilityTest {
         var step2 := step1.Map<string>((x) => "Value: "+OfInt(x));  // Convert to string
         var mappedArb := step2.Map<string>((s) => s + "!");  // Add exclamation mark
 
-        var res1 := mappedArb.Apply(tc);
-        var res2 := mappedArb.Apply(tc);
-        var res3 := mappedArb.Apply(tc);
-        var res4 := mappedArb.Apply(tc);
-        var res5 := mappedArb.Apply(tc);
+        var res1_o := mappedArb.Apply(tc); expect res1_o.Some?; var res1 := res1_o.value;
+        var res2_o := mappedArb.Apply(tc); expect res2_o.Some?; var res2 := res2_o.value;
+        var res3_o := mappedArb.Apply(tc); expect res3_o.Some?; var res3 := res3_o.value;
+        var res4_o := mappedArb.Apply(tc); expect res4_o.Some?; var res4 := res4_o.value;
+        var res5_o := mappedArb.Apply(tc); expect res5_o.Some?; var res5 := res5_o.value;
         print "\nMap Chaining res1, ", res1, "\n";
         print "Map Chaining res2, ", res2, "\n";
         print "Map Chaining res3, ", res3, "\n";
@@ -248,11 +248,11 @@ module PossibilityTest {
         var mappedArb := listsArb.Map<seq<string>>((list) => 
             seq<string>(|list|, (i) => "Item: "+OfInt(i))); // Convert each int to string
 
-        var res1 := mappedArb.Apply(tc);
-        var res2 := mappedArb.Apply(tc);
-        var res3 := mappedArb.Apply(tc);
-        var res4 := mappedArb.Apply(tc);
-        var res5 := mappedArb.Apply(tc);
+        var res1_o := mappedArb.Apply(tc); expect res1_o.Some?; var res1 := res1_o.value;
+        var res2_o := mappedArb.Apply(tc); expect res2_o.Some?; var res2 := res2_o.value;
+        var res3_o := mappedArb.Apply(tc); expect res3_o.Some?; var res3 := res3_o.value;
+        var res4_o := mappedArb.Apply(tc); expect res4_o.Some?; var res4 := res4_o.value;
+        var res5_o := mappedArb.Apply(tc); expect res5_o.Some?; var res5 := res5_o.value;
         print "\nMap With Lists res1, ", res1, "\n";
         print "Map With Lists res2, ", res2, "\n";
         print "Map With Lists res3, ", res3, "\n";
@@ -268,11 +268,11 @@ module PossibilityTest {
         var boolArb := Arbitrary<bool>.Bools();
         var tupleArb := Arbitrary<(int, bool)>.Tuple(intArb, boolArb);
 
-        var res1 := tupleArb.Apply(tc);
-        var res2 := tupleArb.Apply(tc);
-        var res3 := tupleArb.Apply(tc);
-        var res4 := tupleArb.Apply(tc);
-        var res5 := tupleArb.Apply(tc);
+        var res1_o := tupleArb.Apply(tc); expect res1_o.Some?; var res1 := res1_o.value;
+        var res2_o := tupleArb.Apply(tc); expect res2_o.Some?; var res2 := res2_o.value;
+        var res3_o := tupleArb.Apply(tc); expect res3_o.Some?; var res3 := res3_o.value;
+        var res4_o := tupleArb.Apply(tc); expect res4_o.Some?; var res4 := res4_o.value;
+        var res5_o := tupleArb.Apply(tc); expect res5_o.Some?; var res5 := res5_o.value;
         print "\nTuple Int Bool res1, ", res1, "\n";
         print "Tuple Int Bool res2, ", res2, "\n";
         print "Tuple Int Bool res3, ", res3, "\n";
@@ -288,11 +288,11 @@ module PossibilityTest {
         var intArb := Arbitrary<int>.Range(10, 21); // Range 10-20 inclusive
         var tupleArb := Arbitrary<(string, int)>.Tuple(stringArb, intArb);
 
-        var res1 := tupleArb.Apply(tc);
-        var res2 := tupleArb.Apply(tc);
-        var res3 := tupleArb.Apply(tc);
-        var res4 := tupleArb.Apply(tc);
-        var res5 := tupleArb.Apply(tc);
+        var res1_o := tupleArb.Apply(tc); expect res1_o.Some?; var res1 := res1_o.value;
+        var res2_o := tupleArb.Apply(tc); expect res2_o.Some?; var res2 := res2_o.value;
+        var res3_o := tupleArb.Apply(tc); expect res3_o.Some?; var res3 := res3_o.value;
+        var res4_o := tupleArb.Apply(tc); expect res4_o.Some?; var res4 := res4_o.value;
+        var res5_o := tupleArb.Apply(tc); expect res5_o.Some?; var res5 := res5_o.value;
         print "\nTuple String Int res1, ", res1, "\n";
         print "Tuple String Int res2, ", res2, "\n";
         print "Tuple String Int res3, ", res3, "\n";
@@ -308,11 +308,11 @@ module PossibilityTest {
         var intArb := Arbitrary<int>.Range(1, 4); // Range 1-3 inclusive
         var tupleArb := Arbitrary<(string, int)>.Tuple(justArb, intArb);
 
-        var res1 := tupleArb.Apply(tc);
-        var res2 := tupleArb.Apply(tc);
-        var res3 := tupleArb.Apply(tc);
-        var res4 := tupleArb.Apply(tc);
-        var res5 := tupleArb.Apply(tc);
+        var res1_o := tupleArb.Apply(tc); expect res1_o.Some?; var res1 := res1_o.value;
+        var res2_o := tupleArb.Apply(tc); expect res2_o.Some?; var res2 := res2_o.value;
+        var res3_o := tupleArb.Apply(tc); expect res3_o.Some?; var res3 := res3_o.value;
+        var res4_o := tupleArb.Apply(tc); expect res4_o.Some?; var res4 := res4_o.value;
+        var res5_o := tupleArb.Apply(tc); expect res5_o.Some?; var res5 := res5_o.value;
         print "\nTuple With Just res1, ", res1, "\n";
         print "Tuple With Just res2, ", res2, "\n";
         print "Tuple With Just res3, ", res3, "\n";
@@ -329,11 +329,11 @@ module PossibilityTest {
         var tupleArb := Arbitrary<(int, bool)>.Tuple(intArb, boolArb);
         var mappedArb := tupleArb.Map<string>((t: (int, bool)) => "Tuple: " + OfInt(t.0) + " " + (if t.1 then "true" else "false"));
 
-        var res1 := mappedArb.Apply(tc);
-        var res2 := mappedArb.Apply(tc);
-        var res3 := mappedArb.Apply(tc);
-        var res4 := mappedArb.Apply(tc);
-        var res5 := mappedArb.Apply(tc);
+        var res1_o := mappedArb.Apply(tc); expect res1_o.Some?; var res1 := res1_o.value;
+        var res2_o := mappedArb.Apply(tc); expect res2_o.Some?; var res2 := res2_o.value;
+        var res3_o := mappedArb.Apply(tc); expect res3_o.Some?; var res3 := res3_o.value;
+        var res4_o := mappedArb.Apply(tc); expect res4_o.Some?; var res4 := res4_o.value;
+        var res5_o := mappedArb.Apply(tc); expect res5_o.Some?; var res5 := res5_o.value;
         print "\nTuple Chaining res1, ", res1, "\n";
         print "Tuple Chaining res2, ", res2, "\n";
         print "Tuple Chaining res3, ", res3, "\n";
@@ -352,11 +352,11 @@ module PossibilityTest {
         assume {:axiom} forall x,y :: x in mixes && y in mixes ==> x.internalFunction.repr !! y.internalFunction.repr;
         var mixArb := Arbitrary<int>.Mix(mixes);
 
-        var res1 := mixArb.Apply(tc);
-        var res2 := mixArb.Apply(tc);
-        var res3 := mixArb.Apply(tc);
-        var res4 := mixArb.Apply(tc);
-        var res5 := mixArb.Apply(tc);
+        var res1_o := mixArb.Apply(tc); expect res1_o.Some?; var res1 := res1_o.value;
+        var res2_o := mixArb.Apply(tc); expect res2_o.Some?; var res2 := res2_o.value;
+        var res3_o := mixArb.Apply(tc); expect res3_o.Some?; var res3 := res3_o.value;
+        var res4_o := mixArb.Apply(tc); expect res4_o.Some?; var res4 := res4_o.value;
+        var res5_o := mixArb.Apply(tc); expect res5_o.Some?; var res5 := res5_o.value;
         print "\nMix Ints res1, ", res1, "\n";
         print "Mix Ints res2, ", res2, "\n";
         print "Mix Ints res3, ", res3, "\n";
@@ -376,11 +376,11 @@ module PossibilityTest {
         assume {:axiom} forall x,y :: x in mixes && y in mixes ==> x.internalFunction.repr !! y.internalFunction.repr;
         var mixArb := Arbitrary<string>.Mix(mixes);
 
-        var res1 := mixArb.Apply(tc);
-        var res2 := mixArb.Apply(tc);
-        var res3 := mixArb.Apply(tc);
-        var res4 := mixArb.Apply(tc);
-        var res5 := mixArb.Apply(tc);
+        var res1_o := mixArb.Apply(tc); expect res1_o.Some?; var res1 := res1_o.value;
+        var res2_o := mixArb.Apply(tc); expect res2_o.Some?; var res2 := res2_o.value;
+        var res3_o := mixArb.Apply(tc); expect res3_o.Some?; var res3 := res3_o.value;
+        var res4_o := mixArb.Apply(tc); expect res4_o.Some?; var res4 := res4_o.value;
+        var res5_o := mixArb.Apply(tc); expect res5_o.Some?; var res5 := res5_o.value;
         print "\nMix Strings res1, ", res1, "\n";
         print "Mix Strings res2, ", res2, "\n";
         print "Mix Strings res3, ", res3, "\n";
@@ -403,11 +403,11 @@ module PossibilityTest {
         var mixArb := Arbitrary<bool>.Mix(mixes);
         // assert fresh(mixArb.internalFunction.repr);
 
-        var res1 := mixArb.Apply(tc);
-        var res2 := mixArb.Apply(tc);
-        var res3 := mixArb.Apply(tc);
-        var res4 := mixArb.Apply(tc);
-        var res5 := mixArb.Apply(tc);
+        var res1_o := mixArb.Apply(tc); expect res1_o.Some?; var res1 := res1_o.value;
+        var res2_o := mixArb.Apply(tc); expect res2_o.Some?; var res2 := res2_o.value;
+        var res3_o := mixArb.Apply(tc); expect res3_o.Some?; var res3 := res3_o.value;
+        var res4_o := mixArb.Apply(tc); expect res4_o.Some?; var res4 := res4_o.value;
+        var res5_o := mixArb.Apply(tc); expect res5_o.Some?; var res5 := res5_o.value;
         print "\nMix Bools res1, ", res1, "\n";
         print "Mix Bools res2, ", res2, "\n";
         print "Mix Bools res3, ", res3, "\n";
@@ -426,11 +426,11 @@ module PossibilityTest {
         assume {:axiom} forall x,y :: x in mixes && y in mixes ==> x.internalFunction.repr !! y.internalFunction.repr;
         var mixArb := Arbitrary<int>.Mix(mixes);
 
-        var res1 := mixArb.Apply(tc);
-        var res2 := mixArb.Apply(tc);
-        var res3 := mixArb.Apply(tc);
-        var res4 := mixArb.Apply(tc);
-        var res5 := mixArb.Apply(tc);
+        var res1_o := mixArb.Apply(tc); expect res1_o.Some?; var res1 := res1_o.value;
+        var res2_o := mixArb.Apply(tc); expect res2_o.Some?; var res2 := res2_o.value;
+        var res3_o := mixArb.Apply(tc); expect res3_o.Some?; var res3 := res3_o.value;
+        var res4_o := mixArb.Apply(tc); expect res4_o.Some?; var res4 := res4_o.value;
+        var res5_o := mixArb.Apply(tc); expect res5_o.Some?; var res5 := res5_o.value;
         print "\nMix With Of res1, ", res1, "\n";
         print "Mix With Of res2, ", res2, "\n";
         print "Mix With Of res3, ", res3, "\n";
@@ -450,11 +450,11 @@ module PossibilityTest {
         assume {:axiom} forall x,y :: x in mixes && y in mixes ==> x.internalFunction.repr !! y.internalFunction.repr;
         var mixArb := Arbitrary<seq<int>>.Mix(mixes);
 
-        var res1 := mixArb.Apply(tc);
-        var res2 := mixArb.Apply(tc);
-        var res3 := mixArb.Apply(tc);
-        var res4 := mixArb.Apply(tc);
-        var res5 := mixArb.Apply(tc);
+        var res1_o := mixArb.Apply(tc); expect res1_o.Some?; var res1 := res1_o.value;
+        var res2_o := mixArb.Apply(tc); expect res2_o.Some?; var res2 := res2_o.value;
+        var res3_o := mixArb.Apply(tc); expect res3_o.Some?; var res3 := res3_o.value;
+        var res4_o := mixArb.Apply(tc); expect res4_o.Some?; var res4 := res4_o.value;
+        var res5_o := mixArb.Apply(tc); expect res5_o.Some?; var res5 := res5_o.value;
         print "\nMix With Lists res1, ", res1, "\n";
         print "Mix With Lists res2, ", res2, "\n";
         print "Mix With Lists res3, ", res3, "\n";
@@ -473,11 +473,11 @@ module PossibilityTest {
         var mixArb := Arbitrary<int>.Mix(mixes);
         var mappedArb := mixArb.Map<string>((x) => "Mixed: " + OfInt(x));
 
-        var res1 := mappedArb.Apply(tc);
-        var res2 := mappedArb.Apply(tc);
-        var res3 := mappedArb.Apply(tc);
-        var res4 := mappedArb.Apply(tc);
-        var res5 := mappedArb.Apply(tc);
+        var res1_o := mappedArb.Apply(tc); expect res1_o.Some?; var res1 := res1_o.value;
+        var res2_o := mappedArb.Apply(tc); expect res2_o.Some?; var res2 := res2_o.value;
+        var res3_o := mappedArb.Apply(tc); expect res3_o.Some?; var res3 := res3_o.value;
+        var res4_o := mappedArb.Apply(tc); expect res4_o.Some?; var res4 := res4_o.value;
+        var res5_o := mappedArb.Apply(tc); expect res5_o.Some?; var res5 := res5_o.value;
         print "\nMix Chaining res1, ", res1, "\n";
         print "Mix Chaining res2, ", res2, "\n";
         print "Mix Chaining res3, ", res3, "\n";
@@ -498,11 +498,11 @@ module PossibilityTest {
         assume {:axiom} forall x,y :: x in mixes && y in mixes ==> x.internalFunction.repr !! y.internalFunction.repr;
         var mixArb := Arbitrary<(int, bool)>.Mix(mixes);
 
-        var res1 := mixArb.Apply(tc);
-        var res2 := mixArb.Apply(tc);
-        var res3 := mixArb.Apply(tc);
-        var res4 := mixArb.Apply(tc);
-        var res5 := mixArb.Apply(tc);
+        var res1_o := mixArb.Apply(tc); expect res1_o.Some?; var res1 := res1_o.value;
+        var res2_o := mixArb.Apply(tc); expect res2_o.Some?; var res2 := res2_o.value;
+        var res3_o := mixArb.Apply(tc); expect res3_o.Some?; var res3 := res3_o.value;
+        var res4_o := mixArb.Apply(tc); expect res4_o.Some?; var res4 := res4_o.value;
+        var res5_o := mixArb.Apply(tc); expect res5_o.Some?; var res5 := res5_o.value;
         print "\nMix With Tuple res1, ", res1, "\n";
         print "Mix With Tuple res2, ", res2, "\n";
         print "Mix With Tuple res3, ", res3, "\n";
@@ -524,11 +524,11 @@ module PossibilityTest {
         assume {:axiom} forall x,y :: x in mixes && y in mixes ==> x.internalFunction.repr !! y.internalFunction.repr;
         var mixArb := Arbitrary<int>.Mix(mixes);
 
-        var res1 := mixArb.Apply(tc);
-        var res2 := mixArb.Apply(tc);
-        var res3 := mixArb.Apply(tc);
-        var res4 := mixArb.Apply(tc);
-        var res5 := mixArb.Apply(tc);
+        var res1_o := mixArb.Apply(tc); expect res1_o.Some?; var res1 := res1_o.value;
+        var res2_o := mixArb.Apply(tc); expect res2_o.Some?; var res2 := res2_o.value;
+        var res3_o := mixArb.Apply(tc); expect res3_o.Some?; var res3 := res3_o.value;
+        var res4_o := mixArb.Apply(tc); expect res4_o.Some?; var res4 := res4_o.value;
+        var res5_o := mixArb.Apply(tc); expect res5_o.Some?; var res5 := res5_o.value;
         print "\nMix Large Sequence res1, ", res1, "\n";
         print "Mix Large Sequence res2, ", res2, "\n";
         print "Mix Large Sequence res3, ", res3, "\n";
@@ -547,7 +547,7 @@ module PossibilityTest {
             ensures p.Valid()
             ensures fresh(p.internalFunction.repr)
        {
-            expect {:axiom } 0 < t < MaxLong;
+            expect {:axiom } 0 < t < MaxChoice;
             var range := Arbitrary<int>.Range(0, t);
             var pruferSequence := Arbitrary<int>.Lists(range, t, t);
             var length := Arbitrary<int>.Just(t);
@@ -561,11 +561,11 @@ module PossibilityTest {
         assert fresh(range1Arb.internalFunction.repr);
         var pfm := new PruferFlatMap();
         var pruferSequenceArb := range1Arb.FlatMap(pfm);
-        var res1 := pruferSequenceArb.Apply(tc);
-        var res2 := pruferSequenceArb.Apply(tc);
-        var res3 := pruferSequenceArb.Apply(tc);
-        var res4 := pruferSequenceArb.Apply(tc);
-        var res5 := pruferSequenceArb.Apply(tc);
+        var res1_o := pruferSequenceArb.Apply(tc); expect res1_o.Some?; var res1 := res1_o.value;
+        var res2_o := pruferSequenceArb.Apply(tc); expect res2_o.Some?; var res2 := res2_o.value;
+        var res3_o := pruferSequenceArb.Apply(tc); expect res3_o.Some?; var res3 := res3_o.value;
+        var res4_o := pruferSequenceArb.Apply(tc); expect res4_o.Some?; var res4 := res4_o.value;
+        var res5_o := pruferSequenceArb.Apply(tc); expect res5_o.Some?; var res5 := res5_o.value;
         print "Prufer seq res1, ", res1, "\n";
         print "Prufer seq res2, ", res2, "\n";
         print "Prufer seq res3, ", res3, "\n";
