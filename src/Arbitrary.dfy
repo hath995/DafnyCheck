@@ -1,4 +1,4 @@
-include "./RandomGenerator.dfy"
+﻿include "./RandomGenerator.dfy"
 include "./TestStatus.dfy"
 include "./TestResult.dfy"
 module Arbitraries {
@@ -91,7 +91,7 @@ module Arbitraries {
     }
 
     // Boolean choice with 50% probability. Native: one Choice draw, compare against
-    // MOD/2. No real, no bv64 — a boolean is not "an arbitrary for real".
+    // MOD/2. No real, no bv64 â€” a boolean is not "an arbitrary for real".
     method BooleanChoice() returns (result: bool)
       ensures old(this.Valid()) ==> this.Valid()
       // ensures old(repr) == repr
@@ -248,7 +248,7 @@ module Arbitraries {
   }
 
     // Choice bound for generator arguments. Was MaxLong (2^64-1, the old bv64 choice
-    // base); now MaxChoice (2^32-1) since choices are uint32 — imported from
+    // base); now MaxChoice (2^32-1) since choices are uint32 â€” imported from
     // RandomGenerator. Generator args (|args|, max-min, |possibilities|, list bound)
     // are cast `as Choice` for MakeChoice, so they must fit a uint32.
     trait Transformable<T> {
@@ -271,7 +271,7 @@ module Arbitraries {
             ensures Valid() ==> this in repr
             ensures Valid() ==> childRepr < this.repr
             ensures Valid() ==> this.repr == {this} + childRepr
-            decreases repr, childRepr
+            decreases repr, childRepr, 0
     }
 
     class OfTransformable<T> extends Transformable<T> {
@@ -292,7 +292,7 @@ module Arbitraries {
             ensures Valid() ==> this in repr
             ensures Valid() ==> childRepr < this.repr
             ensures Valid() ==> this.repr == {this} + childRepr
-            decreases repr, childRepr
+            decreases repr, childRepr, 0
         {
             this in repr && 0 < |args| <= MaxChoice && childRepr < this.repr && this.repr == {this} + childRepr
         }
@@ -335,7 +335,7 @@ module Arbitraries {
             ensures Valid() ==> this in repr
             ensures Valid() ==> childRepr < this.repr
             ensures Valid() ==> this.repr == {this} + childRepr
-            decreases repr, childRepr
+            decreases repr, childRepr, 0
         {
             this in this.repr && childRepr < this.repr && this.repr == {this} + childRepr
         }
@@ -375,7 +375,7 @@ module Arbitraries {
             ensures Valid() ==> this in repr
             ensures Valid() ==> childRepr < this.repr
             ensures Valid() ==> this.repr == {this} + childRepr
-            decreases repr, childRepr
+            decreases repr, childRepr, 0
         {
             this in repr && min <= max && (0 < max - min <= MaxChoice) && childRepr < this.repr && this.repr == {this} + childRepr
         }
@@ -444,17 +444,17 @@ module Arbitraries {
             ensures Valid() ==> this in repr
             ensures Valid() ==> childRepr < this.repr
             ensures Valid() ==> this.repr == {this} + childRepr
-            decreases repr, childRepr
+            decreases repr, childRepr, 0
         {
             this in repr && 
             0 < |possibilities| < MaxChoice && 
             (forall i :: 0 <= i < |possibilities| ==> possibilities[i].internalFunction in childRepr) &&
             (forall i :: 0 <= i < |possibilities| ==> possibilities[i].internalFunction.repr <= childRepr) &&
             (forall x,y :: x in possibilities && y in possibilities && x != y ==> x.internalFunction.repr !! y.internalFunction.repr) &&
+            childRepr < this.repr &&
+            this.repr == {this} + childRepr &&
             //New errror exception until further research
-            (forall i :: 0 <= i < |possibilities| ==> possibilities[i].Valid()) &&
-            childRepr < this.repr && 
-            this.repr == {this} + childRepr
+            (forall i :: 0 <= i < |possibilities| ==> possibilities[i].Valid())
         }
 
         method Apply(tc: TestCase) returns (result: T)
@@ -497,7 +497,7 @@ module Arbitraries {
             ensures Valid() ==> this in repr
             ensures Valid() ==> childRepr < this.repr
             ensures Valid() ==> this.repr == {this} + childRepr
-            decreases repr, childRepr
+            decreases repr, childRepr, 0
         {
             this.repr == {this} + childRepr && childRepr < this.repr
         }
@@ -542,7 +542,7 @@ module Arbitraries {
         }
 
         ghost predicate Valid()
-            decreases repr, childRepr
+            decreases repr, childRepr, 0
             ensures Valid() ==> this in repr
             ensures Valid() ==> childRepr < this.repr
             ensures Valid() ==> this.repr == {this} + childRepr
@@ -620,7 +620,7 @@ module Arbitraries {
         }
 
         ghost predicate Valid()
-            decreases repr, childRepr
+            decreases repr, childRepr, 0
             ensures Valid() ==> this in repr
             ensures Valid() ==> childRepr < this.repr
             ensures Valid() ==> this.repr == {this} + childRepr
@@ -704,7 +704,7 @@ module Arbitraries {
       }
 
         ghost predicate Valid()
-            decreases repr, childRepr
+            decreases repr, childRepr, 0
             ensures Valid() ==> this in repr
             ensures Valid() ==> childRepr < this.repr
             ensures Valid() ==> this.repr == {this} + childRepr
@@ -754,7 +754,7 @@ module Arbitraries {
         }
 
         ghost predicate Valid()
-            decreases repr, childRepr
+            decreases repr, childRepr, 0
             ensures Valid() ==> this in repr
             ensures Valid() ==> childRepr < this.repr
             ensures Valid() ==> this.repr == {this} + childRepr
@@ -819,7 +819,7 @@ module Arbitraries {
             ensures Valid() ==> this in repr
             ensures Valid() ==> childRepr < this.repr
             ensures Valid() ==> this.repr == {this} + childRepr
-            decreases repr, childRepr
+            decreases repr, childRepr, 0
         {
             this in repr && this.repr == {this} + childRepr &&
             childRepr < repr &&
@@ -873,7 +873,7 @@ module Arbitraries {
             this.repr := {this} + this.childRepr;
         }
         ghost predicate Valid()
-            decreases repr, childRepr
+            decreases repr, childRepr, 0
             ensures Valid() ==> this in repr
             ensures Valid() ==> childRepr < this.repr
             ensures Valid() ==> this.repr == {this} + childRepr
@@ -946,7 +946,7 @@ module Arbitraries {
             this.repr := {this} + this.childRepr;
         }
         ghost predicate Valid()
-            decreases repr, childRepr
+            decreases repr, childRepr, 0
             ensures Valid() ==> this in repr
             ensures Valid() ==> childRepr < this.repr
             ensures Valid() ==> this.repr == {this} + childRepr
@@ -1010,7 +1010,7 @@ module Arbitraries {
             this.repr := {this} + this.childRepr;
         }
         ghost predicate Valid()
-            decreases repr, childRepr
+            decreases repr, childRepr, 0
             ensures Valid() ==> this in repr
             ensures Valid() ==> childRepr < this.repr
             ensures Valid() ==> this.repr == {this} + childRepr
@@ -1084,7 +1084,7 @@ module Arbitraries {
             ensures Valid() ==> this in repr
             ensures Valid() ==> childRepr < this.repr
             ensures Valid() ==> this.repr == {this} + childRepr
-            decreases repr, childRepr
+            decreases repr, childRepr, 0
         {
             this.repr == {this} + childRepr && childRepr < this.repr && 0 < bound <= MaxChoice
         }
@@ -1123,7 +1123,7 @@ module Arbitraries {
             ensures Valid() ==> this in repr
             ensures Valid() ==> childRepr < this.repr
             ensures Valid() ==> this.repr == {this} + childRepr
-            decreases repr, childRepr
+            decreases repr, childRepr, 0
         {
             this.repr == {this} + childRepr && childRepr < this.repr
         }
@@ -1160,7 +1160,7 @@ module Arbitraries {
             ensures Valid() ==> this in repr
             ensures Valid() ==> childRepr < this.repr
             ensures Valid() ==> this.repr == {this} + childRepr
-            decreases repr, childRepr
+            decreases repr, childRepr, 0
         {
             this.repr == {this} + childRepr && childRepr < this.repr
         }
@@ -1196,7 +1196,7 @@ module Arbitraries {
             ensures Valid() ==> this in repr
             ensures Valid() ==> childRepr < this.repr
             ensures Valid() ==> this.repr == {this} + childRepr
-            decreases repr, childRepr
+            decreases repr, childRepr, 0
         { this.repr == {this} + childRepr && childRepr < this.repr }
         method Apply(tc: TestCase) returns (result: bv1)
             requires allocated(tc) requires this.Valid() requires tc.repr !! this.repr
@@ -1219,7 +1219,7 @@ module Arbitraries {
             ensures Valid() ==> this in repr
             ensures Valid() ==> childRepr < this.repr
             ensures Valid() ==> this.repr == {this} + childRepr
-            decreases repr, childRepr
+            decreases repr, childRepr, 0
         { this.repr == {this} + childRepr && childRepr < this.repr }
         method Apply(tc: TestCase) returns (result: bv2)
             requires allocated(tc) requires this.Valid() requires tc.repr !! this.repr
@@ -1242,7 +1242,7 @@ module Arbitraries {
             ensures Valid() ==> this in repr
             ensures Valid() ==> childRepr < this.repr
             ensures Valid() ==> this.repr == {this} + childRepr
-            decreases repr, childRepr
+            decreases repr, childRepr, 0
         { this.repr == {this} + childRepr && childRepr < this.repr }
         method Apply(tc: TestCase) returns (result: bv8)
             requires allocated(tc) requires this.Valid() requires tc.repr !! this.repr
@@ -1265,7 +1265,7 @@ module Arbitraries {
             ensures Valid() ==> this in repr
             ensures Valid() ==> childRepr < this.repr
             ensures Valid() ==> this.repr == {this} + childRepr
-            decreases repr, childRepr
+            decreases repr, childRepr, 0
         { this.repr == {this} + childRepr && childRepr < this.repr }
         method Apply(tc: TestCase) returns (result: bv16)
             requires allocated(tc) requires this.Valid() requires tc.repr !! this.repr
@@ -1288,7 +1288,7 @@ module Arbitraries {
             ensures Valid() ==> this in repr
             ensures Valid() ==> childRepr < this.repr
             ensures Valid() ==> this.repr == {this} + childRepr
-            decreases repr, childRepr
+            decreases repr, childRepr, 0
         { this.repr == {this} + childRepr && childRepr < this.repr }
         method Apply(tc: TestCase) returns (result: bv32)
             requires allocated(tc) requires this.Valid() requires tc.repr !! this.repr
@@ -1315,7 +1315,7 @@ module Arbitraries {
             ensures Valid() ==> this in repr
             ensures Valid() ==> childRepr < this.repr
             ensures Valid() ==> this.repr == {this} + childRepr
-            decreases repr, childRepr
+            decreases repr, childRepr, 0
         { this.repr == {this} + childRepr && childRepr < this.repr }
         method Apply(tc: TestCase) returns (result: bv64)
             requires allocated(tc) requires this.Valid() requires tc.repr !! this.repr
@@ -1345,7 +1345,7 @@ module Arbitraries {
             ensures Valid() ==> this in repr
             ensures Valid() ==> childRepr < this.repr
             ensures Valid() ==> this.repr == {this} + childRepr
-            decreases repr, childRepr
+            decreases repr, childRepr, 0
         { this.repr == {this} + childRepr && childRepr < this.repr }
         method Apply(tc: TestCase) returns (result: bv128)
             requires allocated(tc) requires this.Valid() requires tc.repr !! this.repr
@@ -1385,7 +1385,7 @@ module Arbitraries {
             ensures Valid() ==> this in repr
             ensures Valid() ==> childRepr < this.repr
             ensures Valid() ==> this.repr == {this} + childRepr
-            decreases repr, childRepr
+            decreases repr, childRepr, 0
         { this.repr == {this} + childRepr && childRepr < this.repr }
         method Apply(tc: TestCase) returns (result: bv256)
             requires allocated(tc) requires this.Valid() requires tc.repr !! this.repr
@@ -1430,7 +1430,7 @@ module Arbitraries {
     }
 
     // ================================================================
-    // letrec-style recursive generators (à la fast-check's letrec).
+    // letrec-style recursive generators (Ã  la fast-check's letrec).
     //
     // A `Registry<T>` ties mutually-recursive arbitraries together by name.
     // Build each named arbitrary using `reg.Tie(name)` wherever a recursive
@@ -1448,7 +1448,7 @@ module Arbitraries {
     // distinct ties satisfy the pairwise-disjointness preconditions of Tuple/Mix
     // even though they alias the same registry slot. At Apply time a lazy resolves
     // its name in the registry; the TestCase `depth` field is the recursion
-    // budget — at `maxDepth` the lazy yields the registry's base-case arbitrary
+    // budget â€” at `maxDepth` the lazy yields the registry's base-case arbitrary
     // instead of recursing, which is what makes generation terminate (the base
     // case must be non-recursive). Like FlatMap, the resolve-through-dispatch step
     // carries an accepted "decreases" obligation and a couple of framing axioms.
@@ -1517,7 +1517,7 @@ module Arbitraries {
             ensures Valid() ==> this in repr
             ensures Valid() ==> childRepr < this.repr
             ensures Valid() ==> this.repr == {this} + childRepr
-            decreases repr, childRepr
+            decreases repr, childRepr, 0
         {
             this.repr == {this} + childRepr && childRepr < this.repr
         }
@@ -1547,7 +1547,7 @@ module Arbitraries {
             if !useBase {
                 tc.depth := d0 + 1;
             }
-            // KNOWN: "decreases clause might not decrease" here is expected — through
+            // KNOWN: "decreases clause might not decrease" here is expected â€” through
             // the registry this dispatches back into LazyArbitrary.Apply (the letrec
             // cycle), which the trait's repr-based metric can't reconcile. Termination
             // is enforced at runtime by the `depth`/maxDepth budget above. Future work.
@@ -1561,12 +1561,9 @@ module Arbitraries {
 
         ghost predicate Valid()
             reads internalFunction, internalFunction.repr
-            decreases internalFunction.repr, internalFunction.childRepr
+            decreases internalFunction.repr, internalFunction.childRepr, 1
         {
             internalFunction.repr > internalFunction.childRepr &&
-            // KNOWN: "decreases clause might not decrease" verification error here is expected.
-            // Same root cause as Transformable.Apply above; expected to fail until the
-            // termination proof is completed (future work).
             this.internalFunction.Valid()
         }
 
@@ -1713,7 +1710,7 @@ module Arbitraries {
             ensures p.Valid() ensures fresh(p.internalFunction) ensures fresh(p.internalFunction.repr)
         { var t := new BitVectors256Transformable(); p := Arbitrary(t); }
 
-        // Collections derived from the verified Lists/Tuple/Map combinators —
+        // Collections derived from the verified Lists/Tuple/Map combinators â€”
         // generate a seq and project it to the target collection type.
         static method Sets<S(==)>(elementGenerator: Arbitrary<S>, minSize: int, maxSize: int)
             returns (p: Arbitrary<set<S>>)
@@ -1784,7 +1781,7 @@ module Arbitraries {
         }
 
         // (Recursive/letrec generators are provided via the Registry class above,
-        // not as a static factory here — see Registry.Tie / Register / Lookup.)
+        // not as a static factory here â€” see Registry.Tie / Register / Lookup.)
 
         // n-tuple generators (3..10). Each is defined in terms of the previous
         // one: TupleN(a1..aN) = Map(Tuple(a1, Tuple{N-1}(a2..aN))) flattened.
