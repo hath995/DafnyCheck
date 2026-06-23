@@ -74,6 +74,7 @@ module Arbitraries {
     // // Force a specific choice
     method ForcedChoice(n: Choice) returns (result: TestResult<Choice>)
       requires 0 <= n
+      ensures maxSize == old(maxSize)
       ensures |choices| >= old(|choices|)
       ensures result.value.Some? ==> |choices| == old(|choices|) + 1
       ensures result.value.None? ==> choices == old(choices)
@@ -125,6 +126,8 @@ module Arbitraries {
     // Internal weighted choice that returns TestResult
     method WeightedInternal(p: real) returns (result: TestResult<bool>)
       requires 0.0 <= p <= 1.0
+      ensures maxSize == old(maxSize)
+      ensures |choices| >= old(|choices|)
       ensures old(this.Valid()) ==> this.Valid()
       ensures old(repr) == repr
     //   ensures result.value.Some?
@@ -274,8 +277,10 @@ module Arbitraries {
             ensures this.Valid()
             ensures tc.Valid()
             ensures tc.repr == old(tc.repr)
+            ensures |tc.choices| >= old(|tc.choices|)
+            ensures tc.maxSize == old(tc.maxSize)
             ensures this.repr == old(this.repr)
-            decreases repr, childRepr
+            decreases tc.maxSize - |tc.choices|, repr, childRepr
             modifies tc, tc.random
 
         ghost predicate Valid()
@@ -316,8 +321,10 @@ module Arbitraries {
             requires tc.repr !! this.repr
             ensures tc.Valid()
             ensures tc.repr == old(tc.repr)
+            ensures |tc.choices| >= old(|tc.choices|)
+            ensures tc.maxSize == old(tc.maxSize)
             ensures this.repr == old(this.repr)
-            decreases repr, childRepr
+            decreases tc.maxSize - |tc.choices|, repr, childRepr
             modifies tc, tc.random
         {
             var choiceResult := tc.MakeChoice(|args| as Choice);
@@ -359,8 +366,10 @@ module Arbitraries {
             requires tc.repr !! this.repr
             ensures tc.Valid()
             ensures tc.repr == old(tc.repr)
+            ensures |tc.choices| >= old(|tc.choices|)
+            ensures tc.maxSize == old(tc.maxSize)
             ensures this.repr == old(this.repr)
-            decreases repr, childRepr
+            decreases tc.maxSize - |tc.choices|, repr, childRepr
             modifies tc, tc.random
         {
             result := this.value;
@@ -399,8 +408,10 @@ module Arbitraries {
             requires tc.repr !! this.repr
             ensures tc.Valid()
             ensures tc.repr == old(tc.repr)
+            ensures |tc.choices| >= old(|tc.choices|)
+            ensures tc.maxSize == old(tc.maxSize)
             ensures this.repr == old(this.repr)
-            decreases repr, childRepr
+            decreases tc.maxSize - |tc.choices|, repr, childRepr
             modifies tc, tc.random
         {
             var choiceResult := tc.MakeChoice((max - min) as Choice);
@@ -477,8 +488,10 @@ module Arbitraries {
             ensures this.Valid()
             ensures tc.Valid()
             ensures tc.repr == old(tc.repr)
+            ensures |tc.choices| >= old(|tc.choices|)
+            ensures tc.maxSize == old(tc.maxSize)
             ensures this.repr == old(this.repr)
-            decreases repr, childRepr
+            decreases tc.maxSize - |tc.choices|, repr, childRepr
             modifies tc, tc.random
         {
             var choiceResult := tc.MakeChoice(|possibilities| as Choice);
@@ -522,7 +535,9 @@ module Arbitraries {
             requires tc.Valid()
             ensures tc.Valid()
             ensures tc.repr == old(tc.repr)
-            decreases repr, childRepr
+            ensures |tc.choices| >= old(|tc.choices|)
+            ensures tc.maxSize == old(tc.maxSize)
+            decreases tc.maxSize - |tc.choices|, repr, childRepr
             modifies tc, tc.random
         {
             var choiceResult := tc.MakeChoice(2);
@@ -576,8 +591,10 @@ module Arbitraries {
             ensures this.Valid()
             ensures tc.Valid()
             ensures tc.repr == old(tc.repr)
+            ensures |tc.choices| >= old(|tc.choices|)
+            ensures tc.maxSize == old(tc.maxSize)
             ensures this.repr == old(this.repr)
-            decreases repr, childRepr
+            decreases tc.maxSize - |tc.choices|, repr, childRepr
             modifies tc, tc.random
         {
             result := [];
@@ -585,6 +602,8 @@ module Arbitraries {
                 invariant |result| <= maxSize
                 invariant tc.Valid()
                 invariant tc.repr == old(tc.repr)
+                invariant |tc.choices| >= old(|tc.choices|)
+                invariant tc.maxSize == old(tc.maxSize)
                 modifies tc, tc.random
                 decreases maxSize-|result|
             {
@@ -649,8 +668,10 @@ module Arbitraries {
             ensures this.Valid()
             ensures tc.Valid()
             ensures tc.repr == old(tc.repr)
+            ensures |tc.choices| >= old(|tc.choices|)
+            ensures tc.maxSize == old(tc.maxSize)
             ensures this.repr == old(this.repr)
-            decreases repr, childRepr
+            decreases tc.maxSize - |tc.choices|, repr, childRepr
             modifies tc, tc.random
         {
             var chars: seq<nat> := [];
@@ -658,6 +679,8 @@ module Arbitraries {
                 invariant |chars| <= maxLength
                 invariant tc.Valid()
                 invariant tc.repr == old(tc.repr)
+                invariant |tc.choices| >= old(|tc.choices|)
+                invariant tc.maxSize == old(tc.maxSize)
                 invariant forall x :: x in chars ==> x < 0x0000D800
                 modifies tc, tc.random
                 decreases maxLength-|chars|
@@ -737,8 +760,10 @@ module Arbitraries {
             ensures this.Valid()
             ensures tc.Valid()
             ensures tc.repr == old(tc.repr)
+            ensures |tc.choices| >= old(|tc.choices|)
+            ensures tc.maxSize == old(tc.maxSize)
             ensures this.repr == old(this.repr)
-            decreases repr, childRepr
+            decreases tc.maxSize - |tc.choices|, repr, childRepr
             modifies tc, tc.random
         {
           var element := elementGenerator.internalFunction.Apply(tc);
@@ -791,8 +816,10 @@ module Arbitraries {
             ensures this.Valid()
             ensures tc.Valid()
             ensures tc.repr == old(tc.repr)
+            ensures |tc.choices| >= old(|tc.choices|)
+            ensures tc.maxSize == old(tc.maxSize)
             ensures this.repr == old(this.repr)
-            decreases repr, childRepr
+            decreases tc.maxSize - |tc.choices|, repr, childRepr
             modifies tc, tc.random
         {
             var first := firstGenerator.internalFunction.Apply(tc);
@@ -848,8 +875,10 @@ module Arbitraries {
             ensures this.Valid()
             ensures tc.Valid()
             ensures tc.repr == old(tc.repr)
+            ensures |tc.choices| >= old(|tc.choices|)
+            ensures tc.maxSize == old(tc.maxSize)
             ensures this.repr == old(this.repr)
-            decreases repr, childRepr
+            decreases tc.maxSize - |tc.choices|, repr, childRepr
             modifies tc, tc.random
         {
             var intermediateValue := baseGenerator.internalFunction.Apply(tc); // First, generate T
@@ -905,8 +934,10 @@ module Arbitraries {
             ensures this.Valid()
             ensures tc.Valid()
             ensures tc.repr == old(tc.repr)
+            ensures |tc.choices| >= old(|tc.choices|)
+            ensures tc.maxSize == old(tc.maxSize)
             ensures this.repr == old(this.repr)
-            decreases repr, childRepr
+            decreases tc.maxSize - |tc.choices|, repr, childRepr
             modifies tc, tc.random
         {
             var xs: seq<S> := [];
@@ -914,6 +945,8 @@ module Arbitraries {
                 invariant |xs| <= maxSize
                 invariant tc.Valid()
                 invariant tc.repr == old(tc.repr)
+                invariant |tc.choices| >= old(|tc.choices|)
+                invariant tc.maxSize == old(tc.maxSize)
                 modifies tc, tc.random
                 decreases maxSize-|xs|
             {
@@ -978,9 +1011,11 @@ module Arbitraries {
             ensures this.Valid()
             ensures tc.Valid()
             ensures tc.repr == old(tc.repr)
+            ensures |tc.choices| >= old(|tc.choices|)
+            ensures tc.maxSize == old(tc.maxSize)
             ensures this.repr == old(this.repr)
             ensures result.Length0 == rows && result.Length1 == cols
-            decreases repr, childRepr
+            decreases tc.maxSize - |tc.choices|, repr, childRepr
             modifies tc, tc.random
         {
             var m: nat := rows;
@@ -991,6 +1026,8 @@ module Arbitraries {
             while |flat| < total
                 invariant tc.Valid()
                 invariant tc.repr == old(tc.repr)
+                invariant |tc.choices| >= old(|tc.choices|)
+                invariant tc.maxSize == old(tc.maxSize)
                 invariant 1 <= |flat|
                 decreases total - |flat|
                 modifies tc, tc.random
@@ -1042,9 +1079,11 @@ module Arbitraries {
             ensures this.Valid()
             ensures tc.Valid()
             ensures tc.repr == old(tc.repr)
+            ensures |tc.choices| >= old(|tc.choices|)
+            ensures tc.maxSize == old(tc.maxSize)
             ensures this.repr == old(this.repr)
             ensures result.Length0 == rows && result.Length1 == cols && result.Length2 == layers
-            decreases repr, childRepr
+            decreases tc.maxSize - |tc.choices|, repr, childRepr
             modifies tc, tc.random
         {
             var m: nat := rows;
@@ -1056,6 +1095,8 @@ module Arbitraries {
             while |flat| < total
                 invariant tc.Valid()
                 invariant tc.repr == old(tc.repr)
+                invariant |tc.choices| >= old(|tc.choices|)
+                invariant tc.maxSize == old(tc.maxSize)
                 invariant 1 <= |flat|
                 decreases total - |flat|
                 modifies tc, tc.random
@@ -1108,7 +1149,9 @@ module Arbitraries {
             requires tc.Valid()
             ensures tc.Valid()
             ensures tc.repr == old(tc.repr)
-            decreases repr, childRepr
+            ensures |tc.choices| >= old(|tc.choices|)
+            ensures tc.maxSize == old(tc.maxSize)
+            decreases tc.maxSize - |tc.choices|, repr, childRepr
             modifies tc, tc.random
         {
             var c := tc.MakeChoice(bound as Choice);
@@ -1147,7 +1190,9 @@ module Arbitraries {
             requires tc.Valid()
             ensures tc.Valid()
             ensures tc.repr == old(tc.repr)
-            decreases repr, childRepr
+            ensures |tc.choices| >= old(|tc.choices|)
+            ensures tc.maxSize == old(tc.maxSize)
+            decreases tc.maxSize - |tc.choices|, repr, childRepr
             modifies tc, tc.random
         {
             var c := tc.MakeChoice(95);
@@ -1184,7 +1229,9 @@ module Arbitraries {
             requires tc.Valid()
             ensures tc.Valid()
             ensures tc.repr == old(tc.repr)
-            decreases repr, childRepr
+            ensures |tc.choices| >= old(|tc.choices|)
+            ensures tc.maxSize == old(tc.maxSize)
+            decreases tc.maxSize - |tc.choices|, repr, childRepr
             modifies tc, tc.random
         {
             var cn := tc.MakeChoice(1000000);
@@ -1214,7 +1261,9 @@ module Arbitraries {
             requires allocated(tc) requires this.Valid() requires tc.repr !! this.repr
             ensures this.repr == old(this.repr)
             requires tc.Valid() ensures tc.Valid() ensures tc.repr == old(tc.repr)
-            decreases repr, childRepr modifies tc, tc.random
+            ensures |tc.choices| >= old(|tc.choices|)
+            ensures tc.maxSize == old(tc.maxSize)
+            decreases tc.maxSize - |tc.choices|, repr, childRepr modifies tc, tc.random
         {
             var c := tc.MakeChoice(2);
             var v := if c.value.Some? then c.Unwrap() else 0;
@@ -1237,7 +1286,9 @@ module Arbitraries {
             requires allocated(tc) requires this.Valid() requires tc.repr !! this.repr
             ensures this.repr == old(this.repr)
             requires tc.Valid() ensures tc.Valid() ensures tc.repr == old(tc.repr)
-            decreases repr, childRepr modifies tc, tc.random
+            ensures |tc.choices| >= old(|tc.choices|)
+            ensures tc.maxSize == old(tc.maxSize)
+            decreases tc.maxSize - |tc.choices|, repr, childRepr modifies tc, tc.random
         {
             var c := tc.MakeChoice(4);
             var v := if c.value.Some? then c.Unwrap() else 0;
@@ -1260,7 +1311,9 @@ module Arbitraries {
             requires allocated(tc) requires this.Valid() requires tc.repr !! this.repr
             ensures this.repr == old(this.repr)
             requires tc.Valid() ensures tc.Valid() ensures tc.repr == old(tc.repr)
-            decreases repr, childRepr modifies tc, tc.random
+            ensures |tc.choices| >= old(|tc.choices|)
+            ensures tc.maxSize == old(tc.maxSize)
+            decreases tc.maxSize - |tc.choices|, repr, childRepr modifies tc, tc.random
         {
             var c := tc.MakeChoice(256);
             var v := if c.value.Some? then c.Unwrap() else 0;
@@ -1283,7 +1336,9 @@ module Arbitraries {
             requires allocated(tc) requires this.Valid() requires tc.repr !! this.repr
             ensures this.repr == old(this.repr)
             requires tc.Valid() ensures tc.Valid() ensures tc.repr == old(tc.repr)
-            decreases repr, childRepr modifies tc, tc.random
+            ensures |tc.choices| >= old(|tc.choices|)
+            ensures tc.maxSize == old(tc.maxSize)
+            decreases tc.maxSize - |tc.choices|, repr, childRepr modifies tc, tc.random
         {
             var c := tc.MakeChoice(0x10000);
             var v := if c.value.Some? then c.Unwrap() else 0;
@@ -1306,7 +1361,9 @@ module Arbitraries {
             requires allocated(tc) requires this.Valid() requires tc.repr !! this.repr
             ensures this.repr == old(this.repr)
             requires tc.Valid() ensures tc.Valid() ensures tc.repr == old(tc.repr)
-            decreases repr, childRepr modifies tc, tc.random
+            ensures |tc.choices| >= old(|tc.choices|)
+            ensures tc.maxSize == old(tc.maxSize)
+            decreases tc.maxSize - |tc.choices|, repr, childRepr modifies tc, tc.random
         {
             // The native lane only spans 31 bits, so assemble 32 bits from two 16-bit
             // Choice chunks. Each chunk is < 2^16 (MakeChoice rejects >= n), so the
@@ -1333,7 +1390,9 @@ module Arbitraries {
             requires allocated(tc) requires this.Valid() requires tc.repr !! this.repr
             ensures this.repr == old(this.repr)
             requires tc.Valid() ensures tc.Valid() ensures tc.repr == old(tc.repr)
-            decreases repr, childRepr modifies tc, tc.random
+            ensures |tc.choices| >= old(|tc.choices|)
+            ensures tc.maxSize == old(tc.maxSize)
+            decreases tc.maxSize - |tc.choices|, repr, childRepr modifies tc, tc.random
         {
             // 64 bits from four 16-bit Choice chunks (the native lane spans only 31).
             var c0 := tc.MakeChoice(0x10000);
@@ -1363,7 +1422,9 @@ module Arbitraries {
             requires allocated(tc) requires this.Valid() requires tc.repr !! this.repr
             ensures this.repr == old(this.repr)
             requires tc.Valid() ensures tc.Valid() ensures tc.repr == old(tc.repr)
-            decreases repr, childRepr modifies tc, tc.random
+            ensures |tc.choices| >= old(|tc.choices|)
+            ensures tc.maxSize == old(tc.maxSize)
+            decreases tc.maxSize - |tc.choices|, repr, childRepr modifies tc, tc.random
         {
             // 128 bits from eight 16-bit Choice chunks.
             var c0 := tc.MakeChoice(0x10000);
@@ -1403,7 +1464,9 @@ module Arbitraries {
             requires allocated(tc) requires this.Valid() requires tc.repr !! this.repr
             ensures this.repr == old(this.repr)
             requires tc.Valid() ensures tc.Valid() ensures tc.repr == old(tc.repr)
-            decreases repr, childRepr modifies tc, tc.random
+            ensures |tc.choices| >= old(|tc.choices|)
+            ensures tc.maxSize == old(tc.maxSize)
+            decreases tc.maxSize - |tc.choices|, repr, childRepr modifies tc, tc.random
         {
             // 256 bits from sixteen 16-bit Choice chunks.
             var c0 := tc.MakeChoice(0x10000);  var w0 := if c0.value.Some? then c0.Unwrap() else 0;
@@ -1542,7 +1605,9 @@ module Arbitraries {
             requires tc.Valid()
             ensures tc.Valid()
             ensures tc.repr == old(tc.repr)
-            decreases repr, childRepr
+            ensures |tc.choices| >= old(|tc.choices|)
+            ensures tc.maxSize == old(tc.maxSize)
+            decreases tc.maxSize - |tc.choices|, repr, childRepr
             modifies tc, tc.random
         {
             var d0 := tc.depth;
@@ -1586,8 +1651,10 @@ module Arbitraries {
             ensures this.Valid()
             ensures tc.Valid()
             ensures tc.repr == old(tc.repr)
+            ensures |tc.choices| >= old(|tc.choices|)
+            ensures tc.maxSize == old(tc.maxSize)
             ensures this.internalFunction.repr == old(this.internalFunction.repr)
-            decreases this, internalFunction.repr, internalFunction.childRepr
+            decreases tc.maxSize - |tc.choices|, this, internalFunction.repr, internalFunction.childRepr
             modifies tc, tc.random
         {
           result := this.internalFunction.Apply(tc);
