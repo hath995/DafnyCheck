@@ -476,7 +476,6 @@ module Arbitraries {
             (forall x,y :: x in possibilities && y in possibilities && x != y ==> x.internalFunction.repr !! y.internalFunction.repr) &&
             childRepr < this.repr &&
             this.repr == {this} + childRepr &&
-            //New errror exception until further research
             (forall i :: 0 <= i < |possibilities| ==> possibilities[i].Valid())
         }
 
@@ -661,7 +660,7 @@ module Arbitraries {
           this in repr && 0 <= minLength <= maxLength && childRepr < this.repr && this.repr == {this} + childRepr
         }
 
-        method {:isolate_assertions} Apply(tc: TestCase) returns (result: Option<string>)
+        method Apply(tc: TestCase) returns (result: Option<string>)
             requires allocated(tc)
             requires tc.Valid()
             requires this.Valid()

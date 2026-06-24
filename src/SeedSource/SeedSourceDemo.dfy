@@ -10,7 +10,7 @@ include "./SeedSource.dfy"
 // not collide with a same-named package.
 import opened SeedSource
 
-method Main() {
+method {:test} test() {
   var a := GetSeed();
   var b := GetSeed();
   print "seed a = ", a, "\n";
