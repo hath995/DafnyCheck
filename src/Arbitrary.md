@@ -14,12 +14,12 @@ datatype Arbitrary<T> = Arbitrary(internalFunction: Transformable<T>)
 
 ```dafny
 static method Bools() returns (p: Arbitrary<bool>)
-static method Nats(bound: nat) returns (p: Arbitrary<nat>)            // [0, bound), requires 0 < bound <= MaxLong
-static method Range(min: int, max: int) returns (p: Arbitrary<int>)  // [min, max), requires min <= max && 0 < max-min < MaxLong
+static method Nats(bound: nat) returns (p: Arbitrary<nat>)            // [0, bound), requires 0 < bound <= MaxChoice
+static method Range(min: int, max: int) returns (p: Arbitrary<int>)  // [min, max), requires min <= max && 0 < max-min < MaxChoice
 static method Chars() returns (p: Arbitrary<char>)                   // printable ASCII [32,127)
 static method Reals() returns (p: Arbitrary<real>)                   // non-negative rationals
 static method Just<T>(value: T) returns (p: Arbitrary<T>)            // constant
-static method Of<T>(args: seq<T>) returns (p: Arbitrary<T>)          // pick one of args, requires 0 < |args| <= MaxLong
+static method Of<T>(args: seq<T>) returns (p: Arbitrary<T>)          // pick one of args, requires 0 < |args| <= MaxChoice
 static method Strings(minLength: int, maxLength: int, ascii: bool) returns (p: Arbitrary<string>)
 
 // Fixed-width bit vectors:
@@ -52,11 +52,13 @@ static method Array3<S>(elementGenerator: Arbitrary<S>, rows: nat, cols: nat, la
 ```dafny
 static method Tuple<T, U>(firstGenerator: Arbitrary<T>, secondGenerator: Arbitrary<U>) returns (p: Arbitrary<(T, U)>)
 static method Tuple3<A, B, C>(a, b, c) returns (p: Arbitrary<(A, B, C)>)
-// ... Tuple4 ... Tuple10, each taking N independently-built generators.
+// ... Tuple4 ... Tuple10, each taking N generators.
 ```
 
-`Tuple`/`Tuple3..Tuple10` require their argument generators to have **pairwise-disjoint
-representation sets** — independently-built generators satisfy this automatically.
+`Tuple3..Tuple10` are backed by dedicated `TupleN` datatypes that draw their N children directly
+and build the flat tuple in one step — no nested pairs, no `Map` flatten. The arguments only need
+to be `Valid()`; because an `Arbitrary` is now an immutable value, there is no representation-set
+disjointness to establish.
 
 ## Combinators (instance methods)
 
@@ -66,8 +68,8 @@ method FlatMap<U>(f: FlatMapFn<T, U>) returns (p: Arbitrary<U>)
 static method Mix<T>(possibilities: seq<Arbitrary<T>>) returns (p: Arbitrary<T>)  // pick one generator (oneof)
 ```
 
-`Mix` requires the possibilities to have pairwise-disjoint reprs (distinct independently-built
-generators, or distinct `Registry.Tie` nodes, satisfy this). `FlatMap` takes a
+`Mix` only requires each possibility to be `Valid()` — there is no disjointness obligation, since
+values cannot alias. `FlatMap` takes a
 `trait FlatMapFn<T, U> { method CreateArbitrary(t: T) returns (p: Arbitrary<U>) }`.
 
 ## Recursive generators / letrec — `Registry<T>`
@@ -106,34 +108,48 @@ methods build one for you. Its primitives, used by `Transformable.Apply`:
 
 ```dafny
 class TestCase {
-  constructor(prefix: seq<bv64>, random: XoroShift128Plus, maxSize: nat, printResults: bool)
-  static method ForChoices(choices: seq<bv64>, seed: bv64, printResults: bool) returns (tc: TestCase)
-  method MakeChoice(n: bv64) returns (result: TestResult<bv64>)        // a draw in [0, n)
-  method ForcedChoice(n: bv64) returns (result: TestResult<bv64>)      // force the next choice to n
-  method WeightedInternal(p: real) returns (result: TestResult<bool>)  // weighted coin, requires 0.0 <= p <= 1.0
+  constructor(prefix: seq<Choice>, random: XoroShift128Plus, maxSize: nat, printResults: bool)
+  static method ForChoices(choices: seq<Choice>, seed: bv64, printResults: bool) returns (tc: TestCase)
+  method MakeChoice(n: Choice) returns (result: TestResult<Choice>)     // a draw in [0, n)
+  method ForcedChoice(n: Choice) returns (result: TestResult<Choice>)   // force the next choice to n
+  method WeightedInternal(p: real) returns (result: TestResult<bool>)   // weighted coin, requires 0.0 <= p <= 1.0
 }
 ```
 
+`Choice` is a native uint32. Draws are finite-buffered: once `|choices|` reaches `maxSize` a draw
+overruns, so `Apply` returns `Option<T>` and yields `None` rather than growing the buffer.
+
 ## Writing a custom generator — the `Transformable` trait
 
-Only needed when no combination of the above suffices. Implement the trait, modeling on the
-simplest existing leaf generator (`BoolsTransformable`), then wrap it with `Arbitrary(yourTransformable)`:
+Only needed when no combination of the above suffices. `Transformable` is a **value trait**
+(refined by *datatypes*, not classes — `--general-traits:datatype --type-system-refresh`).
+Implement it as a datatype, modeling on the simplest leaf generator (`BoolsTransformable`), then
+wrap it with `Arbitrary(yourTransformable)`:
 
 ```dafny
 trait Transformable<T> {
-  ghost var repr: set<object>
-  ghost var childRepr: set<object>
+  ghost function Height(): nat
   ghost predicate Valid()
-    reads this, repr, childRepr
-    ensures Valid() ==> this in repr
-    ensures Valid() ==> childRepr < this.repr
-    ensures Valid() ==> this.repr == {this} + childRepr
-  method Apply(tc: TestCase) returns (result: T)
-    requires tc.Valid() && this.Valid() && tc.repr !! this.repr
-    ensures this.Valid() && tc.Valid() && tc.repr == old(tc.repr) && this.repr == old(this.repr)
+    decreases Height(), 0
+  method Apply(tc: TestCase) returns (result: Option<T>)
+    requires tc.Valid() && this.Valid()
+    ensures tc.Valid() && tc.repr == old(tc.repr)
+    ensures |tc.choices| >= old(|tc.choices|) && tc.maxSize == old(tc.maxSize)
+    decreases tc.maxSize - |tc.choices|, Height(), 0
     modifies tc, tc.random
 }
 ```
 
-`Valid()`/`repr`/`childRepr` track a generator's object graph so the engine can keep it disjoint
-from the `TestCase` it draws from; a leaf generator uses `childRepr == {}`, `repr == {this}`.
+`Apply` returns `None` when the choice buffer is exhausted (an overrun — Hypothesis's `StopTest`),
+which propagates up so the example is discarded. Termination leads with the finite-buffer metric
+`tc.maxSize - |tc.choices|`; `Height()` is the structural tie-breaker for combinators that recurse
+into a child *without* first consuming a choice. A leaf generator returns `Height() == 0`; a
+combinator stores a `ghost h` greater than every child's `Height()` and returns it (its `Valid()`
+asserts `child.Height() < h`).
+
+There is **no `repr`/object-graph bookkeeping**: datatype values have no heap identity, so
+generators compose freely with no disjointness obligations. Wrapping a freshly-constructed datatype
+needs one hint, `assert p.internalFunction is YourTransformable;`, to connect the abstract trait
+`Valid()` to the datatype's body (see any factory). The two exceptions that still hold heap
+references are `FlatMapFn` (a stateful factory, a reference trait pinned `extends object`) and
+`Registry`/`LazyArbitrary` (the `letrec` cycle, which is genuinely heap-mutable).
