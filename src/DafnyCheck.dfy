@@ -19,7 +19,7 @@ module DafnyCheck {
   //
   // Implementations must not mutate their own repr — that lets callers thread
   // the same TestFunction through many TestCases without re-declaring modifies.
-  trait {:termination false} TestFunction<T(!new)> {
+  trait {:termination false} TestFunction<T(!new)> extends object {
     ghost var repr: set<object>
 
     ghost predicate Valid()
@@ -53,7 +53,7 @@ module DafnyCheck {
     {
       this.pred := pred;
       this.arb := arb;
-      this.repr := {this} + arb.internalFunction.repr;
+      this.repr := {this};
     }
 
     ghost predicate Valid()
@@ -61,8 +61,7 @@ module DafnyCheck {
       ensures Valid() ==> this in repr
     {
       this in repr &&
-      arb.internalFunction in repr &&
-      arb.internalFunction.repr <= repr &&
+      repr == {this} &&
       arb.Valid()
     }
 
@@ -74,11 +73,8 @@ module DafnyCheck {
       ensures Valid()
       decreases this.repr
     {
-      // arb.internalFunction.repr <= this.repr (from Valid()), so the
-      // strengthened trait precondition this.repr !! tc.repr gives us
-      // arb.internalFunction.repr !! tc.repr for free.
-      assert arb.internalFunction.repr <= this.repr;
-      assert arb.internalFunction.repr !! tc.repr;
+      // arb is now a value (no heap frame), so arb.Apply only needs arb.Valid()
+      // and tc.Valid() — both in scope. No disjointness bookkeeping required.
       var ov := arb.Apply(tc);
       if ov.None? {
         // Generation overran the choice buffer: discard this example (Hypothesis StopTest).
@@ -103,7 +99,7 @@ module DafnyCheck {
   //   Failure(e)     → method errored with payload e (e.g., a message)
   // E is parameterised with (==) so two errors can be compared for
   // equality (future: "did this shrink hit the same failure mode?").
-  trait {:termination false} MethodUnderTest<Input(!new), E(==)> {
+  trait {:termination false} MethodUnderTest<Input(!new), E(==)> extends object {
     ghost predicate Valid() reads this
 
     method run(input: Input) returns (result: Result<bool, E>)
@@ -135,7 +131,7 @@ module DafnyCheck {
       this.arb := arb;
       this.sut := sut;
       this.lastResult := None;
-      this.repr := {this, sut} + arb.internalFunction.repr;
+      this.repr := {this, sut};
     }
 
     ghost predicate Valid()
@@ -144,9 +140,7 @@ module DafnyCheck {
     {
       this in repr &&
       sut in repr &&
-      arb.internalFunction in repr &&
-      arb.internalFunction.repr <= repr &&
-      this !in arb.internalFunction.repr &&
+      repr == {this, sut} &&
       (this as object) != (sut as object) &&
       arb.Valid() && sut.Valid()
     }
@@ -160,8 +154,7 @@ module DafnyCheck {
       ensures this.repr == old(this.repr)
       decreases this.repr
     {
-      assert arb.internalFunction.repr <= this.repr;
-      assert arb.internalFunction.repr !! tc.repr;
+      // arb is a value now — arb.Apply only needs arb.Valid() and tc.Valid().
       var ov := arb.Apply(tc);
       if ov.None? {
         // Generation overran the choice buffer: discard this example (Hypothesis StopTest).
@@ -182,7 +175,7 @@ module DafnyCheck {
   // Exception classes
 
   // RandomGen trait - interface for random number generators
-  trait RandomGen {
+  trait RandomGen extends object {
     var random: XoroShift128Plus
 
     method PostTest(choices: seq<Choice>)

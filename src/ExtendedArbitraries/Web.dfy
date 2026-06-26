@@ -15,8 +15,6 @@ module ExtWeb {
   // <label>.<tld>, e.g. "abc123.com".
   method Domain() returns (p: Arbitrary<string>)
     ensures p.Valid()
-    ensures fresh(p.internalFunction)
-    ensures fresh(p.internalFunction.repr)
   {
     var alnum := Arbitrary<char>.Of(ALNUM);
     var lbl := Arbitrary<seq<char>>.Lists(alnum, 1, 15);
@@ -28,8 +26,6 @@ module ExtWeb {
   // <local>@<domain>, e.g. "abc@example.com".
   method Email() returns (p: Arbitrary<string>)
     ensures p.Valid()
-    ensures fresh(p.internalFunction)
-    ensures fresh(p.internalFunction.repr)
   {
     var alnum := Arbitrary<char>.Of(ALNUM);
     var local := Arbitrary<seq<char>>.Lists(alnum, 1, 10);

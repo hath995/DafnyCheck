@@ -4,7 +4,7 @@ module ttest {
         predicate Valid()
     }
 
-    trait System<Model> {
+    trait System<Model> extends object {
         ghost var repr: set<object>
         var sys: object
 

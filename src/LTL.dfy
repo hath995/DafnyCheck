@@ -458,6 +458,16 @@ module LTL {
 	// Output is WellFormed with the same MaxBindDepth, so chains of Contramap
 	// calls (e.g. Contramap(f, Contramap(g, expr))) verify their preconditions
 	// without separately invoking ContramapPreserves* lemmas.
+	// Unfolds the LTLBind well-formedness invariant once. The refreshed type
+	// system no longer reveals this automatically inside Contramap's rebuilt-bind
+	// lambda, so we expose it as a callable lemma (invoked from an assert-by).
+	lemma WellFormedBindInv<X(!new)>(expr: LTLFormula<X>)
+		requires expr.LTLBind?
+		requires WellFormedFormula(expr)
+		ensures forall b: X :: MaxBindDepth(expr.fn(b)) < expr.depth && WellFormedFormula(expr.fn(b))
+	{
+	}
+
 	function Contramap<B(!new), A(!new)>(fn: A -> B, expr: LTLFormula<B>): (r: LTLFormula<A>)
 		requires WellFormedFormula(expr)
 		ensures WellFormedFormula(r)
@@ -472,8 +482,17 @@ module LTL {
 			case LTLOr(t1, t2, tags) => LTLOr(Contramap(fn, t1), Contramap(fn, t2), tags)
 			case LTLImplies(t1, t2, tags) => LTLImplies(Contramap(fn, t1), Contramap(fn, t2), tags)
 			case LTLNot(t, tags) => LTLNot(Contramap(fn, t), tags)
-			case LTLBind(f, depth, tags) => LTLBind((a: A) =>
-                Contramap(fn, f(fn(a))), depth, tags)
+			case LTLBind(_, _, _) =>
+				// The new type system no longer auto-unfolds WellFormedFormula(expr)
+				// inside the rebuilt-bind lambda, so surface the bind invariant
+				// explicitly: every continuation result has smaller MaxBindDepth and
+				// is itself WellFormed — discharging the inner Contramap's decreases
+				// and precondition for the captured (arbitrary) `a`. We reference the
+				// destructors directly so the facts line up with WellFormedBindInv.
+				assert forall b: B :: MaxBindDepth(expr.fn(b)) < expr.depth && WellFormedFormula(expr.fn(b)) by {
+					WellFormedBindInv(expr);
+				}
+				LTLBind((a: A) => Contramap(fn, expr.fn(fn(a))), expr.depth, expr.tags)
 			case LTLComparison(cmp, tags) => LTLComparison((s: A, n: A) => cmp(fn(s), fn(n)), tags)
 			case LTLEventually(t, steps, tags) => LTLEventually(Contramap(fn, t), steps, tags)
 			case LTLAlways(t, steps, tags) => LTLAlways(Contramap(fn, t), steps, tags)

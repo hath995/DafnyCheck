@@ -105,7 +105,7 @@ abstract module StatefulModelTest {
       this.cmds := cmds;
       this.ltlProperty := ltlProperty;
       this.maxSteps := maxSteps;
-      this.repr := {this} + {cmds.internalFunction} + cmds.internalFunction.repr;
+      this.repr := {this};
     }
 
     ghost predicate Valid()
@@ -113,10 +113,7 @@ abstract module StatefulModelTest {
       ensures Valid() ==> this in repr
     {
       this in repr
-      && cmds.internalFunction in repr
-      && cmds.internalFunction.repr <= repr
-      && this !in cmds.internalFunction.repr
-      && this.repr == {this} + {cmds.internalFunction} + cmds.internalFunction.repr
+      && this.repr == {this}
       && cmds.Valid()
       && WellFormedFormula(ltlProperty)
     }
@@ -156,8 +153,6 @@ abstract module StatefulModelTest {
         invariant sysRepr !! this.repr
         decreases maxSteps - step
       {
-        assert cmds.internalFunction.repr <= this.repr;
-        assert cmds.internalFunction.repr !! tc.repr;
         var ocmd := tc.Any(cmds);
         if ocmd.None? { break; }  // choice buffer exhausted: stop drawing commands
         var cmd := ocmd.value;

@@ -108,11 +108,9 @@ module BitonicSortCaseStudy {
     constructor() ensures fresh(this) {}
     method CreateArbitrary(k: int) returns (p: Arbitrary<seq<int>>)
       ensures p.Valid()
-      ensures fresh(p.internalFunction.repr)
     {
       var kk: nat := if k < 0 then 0 else if k > 5 then 5 else k;
       var elem := Arbitrary<int>.Range(0, 100);
-      assert fresh(elem.internalFunction.repr);
       var len := natPow(2, kk);
       p := Arbitrary<seq<int>>.Lists(elem, len, len);
     }
@@ -132,7 +130,6 @@ module BitonicSortCaseStudy {
     ensures arb.Valid()
   {
     var kGen := Arbitrary<int>.Range(0, 6);
-    assert fresh(kGen.internalFunction.repr);
     var fn := new Pow2Lists();
     arb := kGen.FlatMap(fn);
   }

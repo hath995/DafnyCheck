@@ -245,7 +245,6 @@ module Arbitraries {
 
     // Apply a possibility to generate a value
     method Any<T>(possibility: Arbitrary<T>) returns (result: Option<T>)
-      requires possibility.internalFunction.repr !! this.repr
       requires possibility.Valid()
       requires Valid()
       // decreases parentRepr
@@ -254,7 +253,6 @@ module Arbitraries {
       ensures this.random == old(this.random)
       ensures this.repr == old(this.repr)
       ensures possibility.Valid()
-      ensures possibility.internalFunction.repr == old(possibility.internalFunction.repr)
     {
       this.depth := this.depth + 1;
       result := possibility.Apply(this);
@@ -266,65 +264,48 @@ module Arbitraries {
     // base); now MaxChoice (2^32-1) since choices are uint32 â€” imported from
     // RandomGenerator. Generator args (|args|, max-min, |possibilities|, list bound)
     // are cast `as Choice` for MakeChoice, so they must fit a uint32.
+    // Transformable is now a value trait (datatypes refine it, no `object`
+    // parent). The old repr/childRepr dynamic-frames apparatus collapses to a
+    // single stored ghost `Height()`: combinators that recurse into a child
+    // WITHOUT first consuming a choice require `child.Height() < Height()`
+    // (threaded through Valid), which is the well-founded order replacing
+    // `childRepr < repr`. Apply still leads its `decreases` with the finite
+    // buffer metric `maxSize - |choices|`; Height is only the tie-breaker.
     trait Transformable<T> {
-        ghost var repr: set<object>
-        ghost var childRepr: set<object>
+        ghost function Height(): nat
+
+        ghost predicate Valid()
+            decreases Height(), 0
+
         method Apply(tc: TestCase) returns (result: Option<T>)
             requires allocated(tc)
             requires tc.Valid()
             requires this.Valid()
-            requires tc.repr !! this.repr
-            ensures this.Valid()
             ensures tc.Valid()
             ensures tc.repr == old(tc.repr)
             ensures |tc.choices| >= old(|tc.choices|)
             ensures tc.maxSize == old(tc.maxSize)
-            ensures this.repr == old(this.repr)
-            decreases tc.maxSize - |tc.choices|, repr, childRepr
+            decreases tc.maxSize - |tc.choices|, Height(), 0
             modifies tc, tc.random
-
-        ghost predicate Valid()
-            reads this, repr, childRepr
-            ensures Valid() ==> this in repr
-            ensures Valid() ==> childRepr < this.repr
-            ensures Valid() ==> this.repr == {this} + childRepr
-            decreases repr, childRepr, 0
     }
 
-    class OfTransformable<T> extends Transformable<T> {
-        var args: seq<T>
-        constructor(args: seq<T>)
-            ensures fresh(this)
-            ensures fresh(this.repr)
-            requires 0 < |args| <= MaxChoice
-            ensures Valid()
-        {
-            this.args := args;
-            this.childRepr := {};
-            this.repr := {this} + this.childRepr;
-        }
-
+    datatype OfTransformable<T> extends Transformable<T> = OfT(args: seq<T>) {
+        ghost function Height(): nat { 0 }
         ghost predicate Valid()
-            reads this
-            ensures Valid() ==> this in repr
-            ensures Valid() ==> childRepr < this.repr
-            ensures Valid() ==> this.repr == {this} + childRepr
-            decreases repr, childRepr, 0
+            decreases Height(), 0
         {
-            this in repr && 0 < |args| <= MaxChoice && childRepr < this.repr && this.repr == {this} + childRepr
+            0 < |args| <= MaxChoice
         }
 
         method Apply(tc: TestCase) returns (result: Option<T>)
             requires allocated(tc)
             requires this.Valid()
             requires tc.Valid()
-            requires tc.repr !! this.repr
             ensures tc.Valid()
             ensures tc.repr == old(tc.repr)
             ensures |tc.choices| >= old(|tc.choices|)
             ensures tc.maxSize == old(tc.maxSize)
-            ensures this.repr == old(this.repr)
-            decreases tc.maxSize - |tc.choices|, repr, childRepr
+            decreases tc.maxSize - |tc.choices|, Height(), 0
             modifies tc, tc.random
         {
             var choiceResult := tc.MakeChoice(|args| as Choice);
@@ -337,81 +318,46 @@ module Arbitraries {
         }
     }
 
-    class JustTransformable<T> extends Transformable<T> {
-        var value: T
-        constructor(value: T)
-            ensures fresh(this)
-            ensures fresh(this.repr)
-            ensures Valid()
-        {
-            this.value := value;
-            this.childRepr := {};
-            this.repr := {this} + this.childRepr;
-        }
-
+    datatype JustTransformable<T> extends Transformable<T> = JustT(value: T) {
+        ghost function Height(): nat { 0 }
         ghost predicate Valid()
-            reads this
-            ensures Valid() ==> this in repr
-            ensures Valid() ==> childRepr < this.repr
-            ensures Valid() ==> this.repr == {this} + childRepr
-            decreases repr, childRepr, 0
+            decreases Height(), 0
         {
-            this in this.repr && childRepr < this.repr && this.repr == {this} + childRepr
+            true
         }
 
         method Apply(tc: TestCase) returns (result: Option<T>)
             requires allocated(tc)
             requires this.Valid()
             requires tc.Valid()
-            requires tc.repr !! this.repr
             ensures tc.Valid()
             ensures tc.repr == old(tc.repr)
             ensures |tc.choices| >= old(|tc.choices|)
             ensures tc.maxSize == old(tc.maxSize)
-            ensures this.repr == old(this.repr)
-            decreases tc.maxSize - |tc.choices|, repr, childRepr
+            decreases tc.maxSize - |tc.choices|, Height(), 0
             modifies tc, tc.random
         {
             result := Some(this.value);
         }
     }
 
-    class RangeTransformable extends Transformable<int> {
-        var min: int
-        var max: int
-        constructor(min: int, max: int)
-            ensures fresh(this)
-            ensures fresh(this.repr)
-            requires min <= max && (0 < max - min <= MaxChoice)
-            ensures Valid()
-        {
-            this.min := min;
-            this.max := max;
-            this.childRepr := {};
-            this.repr := {this} + this.childRepr;
-        }
-
+    datatype RangeTransformable extends Transformable<int> = RangeT(min: int, max: int) {
+        ghost function Height(): nat { 0 }
         ghost predicate Valid()
-            reads this
-            ensures Valid() ==> this in repr
-            ensures Valid() ==> childRepr < this.repr
-            ensures Valid() ==> this.repr == {this} + childRepr
-            decreases repr, childRepr, 0
+            decreases Height(), 0
         {
-            this in repr && min <= max && (0 < max - min <= MaxChoice) && childRepr < this.repr && this.repr == {this} + childRepr
+            min <= max && (0 < max - min <= MaxChoice)
         }
 
         method Apply(tc: TestCase) returns (result: Option<int>)
             requires allocated(tc)
             requires tc.Valid()
             requires this.Valid()
-            requires tc.repr !! this.repr
             ensures tc.Valid()
             ensures tc.repr == old(tc.repr)
             ensures |tc.choices| >= old(|tc.choices|)
             ensures tc.maxSize == old(tc.maxSize)
-            ensures this.repr == old(this.repr)
-            decreases tc.maxSize - |tc.choices|, repr, childRepr
+            decreases tc.maxSize - |tc.choices|, Height(), 0
             modifies tc, tc.random
         {
             var choiceResult := tc.MakeChoice((max - min) as Choice);
@@ -447,50 +393,30 @@ module Arbitraries {
     //     }
     // }
 
-    class MixTransformable<T> extends Transformable<T> {
-        var possibilities: seq<Arbitrary<T>>
-        constructor(possibilities: seq<Arbitrary<T>>)
-            ensures fresh(this)
-            // ensures fresh(this.repr)
-            requires 0 < |possibilities| < MaxChoice
-            requires forall x,y :: x in possibilities && y in possibilities && x != y ==> x.internalFunction.repr !! y.internalFunction.repr
-            requires forall i :: 0 <= i < |possibilities| ==> possibilities[i].Valid()
-            ensures Valid()
-        {
-            this.possibilities := possibilities;
-            this.childRepr := set p, q | p in possibilities && q in p.internalFunction.repr :: q;
-            this.repr := {this} + this.childRepr;
-        }
-
+    datatype MixTransformable<T> extends Transformable<T> = MixT(possibilities: seq<Arbitrary<T>>, ghost h: nat) {
+        // Apply draws a choice BEFORE dispatching into the chosen child, so its
+        // termination rests on the buffer metric, not Height. But Valid() still
+        // recurses into each child's Valid(), so Height must dominate the
+        // children for Valid()'s own well-foundedness. The old pairwise
+        // disjointness precondition is gone: values cannot alias.
+        ghost function Height(): nat { h }
         ghost predicate Valid()
-            reads this, repr, childRepr
-            ensures Valid() ==> this in repr
-            ensures Valid() ==> childRepr < this.repr
-            ensures Valid() ==> this.repr == {this} + childRepr
-            decreases repr, childRepr, 0
+            decreases Height(), 0
         {
-            this in repr && 
-            0 < |possibilities| < MaxChoice && 
-            (forall i :: 0 <= i < |possibilities| ==> possibilities[i].internalFunction in childRepr) &&
-            (forall i :: 0 <= i < |possibilities| ==> possibilities[i].internalFunction.repr <= childRepr) &&
-            (forall x,y :: x in possibilities && y in possibilities && x != y ==> x.internalFunction.repr !! y.internalFunction.repr) &&
-            childRepr < this.repr &&
-            this.repr == {this} + childRepr &&
-            (forall i :: 0 <= i < |possibilities| ==> possibilities[i].Valid())
+            0 < |possibilities| < MaxChoice &&
+            (forall i :: 0 <= i < |possibilities| ==>
+                possibilities[i].internalFunction.Height() < h && possibilities[i].Valid())
         }
 
         method Apply(tc: TestCase) returns (result: Option<T>)
             requires allocated(tc)
             requires tc.Valid()
             requires this.Valid()
-            requires tc.repr !! this.repr
-            ensures this.Valid()
             ensures tc.Valid()
             ensures tc.repr == old(tc.repr)
             ensures |tc.choices| >= old(|tc.choices|)
             ensures tc.maxSize == old(tc.maxSize)
-            ensures this.repr == old(this.repr)
-            decreases tc.maxSize - |tc.choices|, repr, childRepr
+            decreases tc.maxSize - |tc.choices|, Height(), 0
             modifies tc, tc.random
         {
             var choiceResult := tc.MakeChoice(|possibilities| as Choice);
@@ -505,37 +431,23 @@ module Arbitraries {
         }
     }
 
-    class BoolsTransformable extends Transformable<bool> {
-        constructor()
-            ensures fresh(this)
-            ensures fresh(this.repr)
-            ensures Valid()
-        {
-            this.childRepr := {};
-            this.repr := {this} + this.childRepr;
-        }
-
+    datatype BoolsTransformable extends Transformable<bool> = BoolsT {
+        ghost function Height(): nat { 0 }
         ghost predicate Valid()
-            reads this
-            ensures Valid() ==> this in repr
-            ensures Valid() ==> childRepr < this.repr
-            ensures Valid() ==> this.repr == {this} + childRepr
-            decreases repr, childRepr, 0
+            decreases Height(), 0
         {
-            this.repr == {this} + childRepr && childRepr < this.repr
+            true
         }
 
         method Apply(tc: TestCase) returns (result: Option<bool>)
             requires allocated(tc)
             requires this.Valid()
-            requires tc.repr !! this.repr
-            ensures this.repr == old(this.repr)
             requires tc.Valid()
             ensures tc.Valid()
             ensures tc.repr == old(tc.repr)
             ensures |tc.choices| >= old(|tc.choices|)
             ensures tc.maxSize == old(tc.maxSize)
-            decreases tc.maxSize - |tc.choices|, repr, childRepr
+            decreases tc.maxSize - |tc.choices|, Height(), 0
             modifies tc, tc.random
         {
             var choiceResult := tc.MakeChoice(2);
@@ -547,52 +459,24 @@ module Arbitraries {
         }
     }
 
-    class ListsTransformable<S> extends Transformable<seq<S>> {
-        var elementGenerator: Arbitrary<S>
-        var minSize: int
-        var maxSize: int
-        constructor(elementGenerator: Arbitrary<S>, minSize: int, maxSize: int)
-            requires 0 <= minSize <= maxSize
-            requires elementGenerator.Valid()
-            ensures elementGenerator.internalFunction.repr < this.repr
-            ensures this.repr == {this}+elementGenerator.internalFunction.repr
-            ensures fresh(this)
-            ensures Valid()
-        {
-            this.elementGenerator := elementGenerator;
-            this.minSize := minSize;
-            this.maxSize := maxSize;
-            this.childRepr := elementGenerator.internalFunction.repr;
-            this.repr := {this} + this.childRepr;
-        }
-
+    datatype ListsTransformable<S> extends Transformable<seq<S>> = ListsT(elementGenerator: Arbitrary<S>, minSize: int, maxSize: int, ghost h: nat) {
+        ghost function Height(): nat { h }
         ghost predicate Valid()
-            decreases repr, childRepr, 0
-            ensures Valid() ==> this in repr
-            ensures Valid() ==> childRepr < this.repr
-            ensures Valid() ==> this.repr == {this} + childRepr
-            reads this, repr, childRepr
+            decreases Height(), 0
         {
-            this in this.repr &&
-            elementGenerator.internalFunction in this.repr &&
-            elementGenerator.internalFunction.repr < this.repr &&
-            0 <= minSize <= maxSize && elementGenerator.Valid() &&
-            childRepr < this.repr && this.repr == {this} + childRepr
+            elementGenerator.internalFunction.Height() < h &&
+            0 <= minSize <= maxSize && elementGenerator.Valid()
         }
 
         method Apply(tc: TestCase) returns (result: Option<seq<S>>)
             requires allocated(tc)
             requires tc.Valid()
             requires this.Valid()
-            requires tc.repr !! this.repr
-            // requires elementGenerator.internalFunction.repr == childRepr;
-            ensures this.Valid()
             ensures tc.Valid()
             ensures tc.repr == old(tc.repr)
             ensures |tc.choices| >= old(|tc.choices|)
             ensures tc.maxSize == old(tc.maxSize)
-            ensures this.repr == old(this.repr)
-            decreases tc.maxSize - |tc.choices|, repr, childRepr
+            decreases tc.maxSize - |tc.choices|, Height(), 0
             modifies tc, tc.random
         {
             var xs: seq<S> := [];
@@ -633,45 +517,23 @@ module Arbitraries {
         }
     }
 
-    class StringsTransformable extends Transformable<string> {
-        var minLength: int
-        var maxLength: int
-        var ascii: bool
-        constructor(minLength: int, maxLength: int, ascii: bool)
-            ensures fresh(this)
-            ensures fresh(this.repr)
-            requires 0 <= minLength <= maxLength
-            ensures Valid()
-        {
-            this.minLength := minLength;
-            this.maxLength := maxLength;
-            this.ascii := ascii;
-            this.childRepr := {};
-            this.repr := {this} + this.childRepr;
-        }
-
+    datatype StringsTransformable extends Transformable<string> = StringsT(minLength: int, maxLength: int, ascii: bool) {
+        ghost function Height(): nat { 0 }
         ghost predicate Valid()
-            decreases repr, childRepr, 0
-            ensures Valid() ==> this in repr
-            ensures Valid() ==> childRepr < this.repr
-            ensures Valid() ==> this.repr == {this} + childRepr
-            reads this, repr, childRepr
+            decreases Height(), 0
         {
-          this in repr && 0 <= minLength <= maxLength && childRepr < this.repr && this.repr == {this} + childRepr
+          0 <= minLength <= maxLength
         }
 
         method Apply(tc: TestCase) returns (result: Option<string>)
             requires allocated(tc)
             requires tc.Valid()
             requires this.Valid()
-            requires tc.repr !! this.repr
-            ensures this.Valid()
             ensures tc.Valid()
             ensures tc.repr == old(tc.repr)
             ensures |tc.choices| >= old(|tc.choices|)
             ensures tc.maxSize == old(tc.maxSize)
-            ensures this.repr == old(this.repr)
-            decreases tc.maxSize - |tc.choices|, repr, childRepr
+            decreases tc.maxSize - |tc.choices|, Height(), 0
             modifies tc, tc.random
         {
             var chars: seq<nat> := [];
@@ -723,34 +585,12 @@ module Arbitraries {
         }
     }
 
-    class MapTransformable<T, U> extends Transformable<T> {
-      var elementGenerator: Arbitrary<U>
-      var fn: U-> T
-      constructor(elementGenerator: Arbitrary<U>, fn: U->T)
-          requires elementGenerator.Valid()
-          ensures elementGenerator.internalFunction.repr < this.repr
-          ensures this.repr == {this}+elementGenerator.internalFunction.repr
-          ensures this.fn == fn
-          ensures fresh(this)
-          ensures Valid()
-      {
-        this.elementGenerator := elementGenerator;
-        this.childRepr := elementGenerator.internalFunction.repr;
-        this.fn := fn;
-        this.repr := {this}+this.childRepr;
-      }
-
+    datatype MapTransformable<T, !U> extends Transformable<T> = MapT(elementGenerator: Arbitrary<U>, fn: U -> T, ghost h: nat) {
+        ghost function Height(): nat { h }
         ghost predicate Valid()
-            decreases repr, childRepr, 0
-            ensures Valid() ==> this in repr
-            ensures Valid() ==> childRepr < this.repr
-            ensures Valid() ==> this.repr == {this} + childRepr
-            reads this, repr, childRepr
+            decreases Height(), 0
         {
-          this in repr && this.repr == {this}+childRepr &&
-            childRepr < repr &&
-            elementGenerator.internalFunction in this.repr &&
-            elementGenerator.internalFunction.repr < this.repr &&
+          elementGenerator.internalFunction.Height() < h &&
             elementGenerator.Valid()
         }
 
@@ -758,14 +598,11 @@ module Arbitraries {
             requires allocated(tc)
             requires tc.Valid()
             requires this.Valid()
-            requires tc.repr !! this.repr
-            ensures this.Valid()
             ensures tc.Valid()
             ensures tc.repr == old(tc.repr)
             ensures |tc.choices| >= old(|tc.choices|)
             ensures tc.maxSize == old(tc.maxSize)
-            ensures this.repr == old(this.repr)
-            decreases tc.maxSize - |tc.choices|, repr, childRepr
+            decreases tc.maxSize - |tc.choices|, Height(), 0
             modifies tc, tc.random
         {
           var element := elementGenerator.internalFunction.Apply(tc);
@@ -774,39 +611,13 @@ module Arbitraries {
         }
     }
 
-    class TupleTransformable<T, U> extends Transformable<(T, U)> {
-        var firstGenerator: Arbitrary<T>
-        var secondGenerator: Arbitrary<U>
-        
-        constructor(firstGenerator: Arbitrary<T>, secondGenerator: Arbitrary<U>)
-            requires firstGenerator.Valid()
-            requires secondGenerator.Valid()
-            ensures firstGenerator.internalFunction.repr < this.repr
-            ensures secondGenerator.internalFunction.repr < this.repr
-            ensures this.repr == {this} + firstGenerator.internalFunction.repr + secondGenerator.internalFunction.repr
-            ensures fresh(this)
-            ensures Valid()
-        {
-            this.firstGenerator := firstGenerator;
-            this.secondGenerator := secondGenerator;
-            this.childRepr := firstGenerator.internalFunction.repr + secondGenerator.internalFunction.repr;
-            this.repr := {this} + this.childRepr;
-        }
-
+    datatype TupleTransformable<T, U> extends Transformable<(T, U)> = TupleT(firstGenerator: Arbitrary<T>, secondGenerator: Arbitrary<U>, ghost h: nat) {
+        ghost function Height(): nat { h }
         ghost predicate Valid()
-            decreases repr, childRepr, 0
-            ensures Valid() ==> this in repr
-            ensures Valid() ==> childRepr < this.repr
-            ensures Valid() ==> this.repr == {this} + childRepr
-            reads this, repr, childRepr
+            decreases Height(), 0
         {
-            this in repr && 
-            this.repr == {this} + childRepr &&
-            childRepr < repr &&
-            firstGenerator.internalFunction in this.repr &&
-            secondGenerator.internalFunction in this.repr &&
-            firstGenerator.internalFunction.repr < this.repr &&
-            secondGenerator.internalFunction.repr < this.repr &&
+            firstGenerator.internalFunction.Height() < h &&
+            secondGenerator.internalFunction.Height() < h &&
             firstGenerator.Valid() &&
             secondGenerator.Valid()
         }
@@ -815,14 +626,11 @@ module Arbitraries {
             requires allocated(tc)
             requires tc.Valid()
             requires this.Valid()
-            requires tc.repr !! this.repr
-            ensures this.Valid()
             ensures tc.Valid()
             ensures tc.repr == old(tc.repr)
             ensures |tc.choices| >= old(|tc.choices|)
             ensures tc.maxSize == old(tc.maxSize)
-            ensures this.repr == old(this.repr)
-            decreases tc.maxSize - |tc.choices|, repr, childRepr
+            decreases tc.maxSize - |tc.choices|, Height(), 0
             modifies tc, tc.random
         {
             var first := firstGenerator.internalFunction.Apply(tc);
@@ -833,42 +641,271 @@ module Arbitraries {
         }
     }
 
+    // Dedicated fixed-arity tuple generators (3..10). Each draws its N children
+    // directly in one Apply and assembles the flat tuple — no nested pairs, no
+    // Map flatten. Valid demands every child's Height < h (needed both for the
+    // recursive child draws and for Valid's own well-foundedness); the factories
+    // set h to the sum of child heights + 1, so each child is < h by nat
+    // arithmetic. This is the arity-2 TupleTransformable pattern generalized.
+    datatype Tuple3Transformable<A, B, C> extends Transformable<(A, B, C)> =
+        Tuple3T(g0: Arbitrary<A>, g1: Arbitrary<B>, g2: Arbitrary<C>, ghost h: nat)
+    {
+        ghost function Height(): nat { h }
+        ghost predicate Valid()
+            decreases Height(), 0
+        {
+            g0.internalFunction.Height() < h && g1.internalFunction.Height() < h &&
+            g2.internalFunction.Height() < h &&
+            g0.Valid() && g1.Valid() && g2.Valid()
+        }
+        method Apply(tc: TestCase) returns (result: Option<(A, B, C)>)
+            requires allocated(tc) requires tc.Valid() requires this.Valid()
+            ensures tc.Valid() ensures tc.repr == old(tc.repr)
+            ensures |tc.choices| >= old(|tc.choices|) ensures tc.maxSize == old(tc.maxSize)
+            decreases tc.maxSize - |tc.choices|, Height(), 0 modifies tc, tc.random
+        {
+            var r0 := g0.internalFunction.Apply(tc); if r0.None? { return None; }
+            var r1 := g1.internalFunction.Apply(tc); if r1.None? { return None; }
+            var r2 := g2.internalFunction.Apply(tc); if r2.None? { return None; }
+            result := Some((r0.value, r1.value, r2.value));
+        }
+    }
 
-    trait FlatMapFn<T, U> {
+    datatype Tuple4Transformable<A, B, C, D> extends Transformable<(A, B, C, D)> =
+        Tuple4T(g0: Arbitrary<A>, g1: Arbitrary<B>, g2: Arbitrary<C>, g3: Arbitrary<D>, ghost h: nat)
+    {
+        ghost function Height(): nat { h }
+        ghost predicate Valid()
+            decreases Height(), 0
+        {
+            g0.internalFunction.Height() < h && g1.internalFunction.Height() < h &&
+            g2.internalFunction.Height() < h && g3.internalFunction.Height() < h &&
+            g0.Valid() && g1.Valid() && g2.Valid() && g3.Valid()
+        }
+        method Apply(tc: TestCase) returns (result: Option<(A, B, C, D)>)
+            requires allocated(tc) requires tc.Valid() requires this.Valid()
+            ensures tc.Valid() ensures tc.repr == old(tc.repr)
+            ensures |tc.choices| >= old(|tc.choices|) ensures tc.maxSize == old(tc.maxSize)
+            decreases tc.maxSize - |tc.choices|, Height(), 0 modifies tc, tc.random
+        {
+            var r0 := g0.internalFunction.Apply(tc); if r0.None? { return None; }
+            var r1 := g1.internalFunction.Apply(tc); if r1.None? { return None; }
+            var r2 := g2.internalFunction.Apply(tc); if r2.None? { return None; }
+            var r3 := g3.internalFunction.Apply(tc); if r3.None? { return None; }
+            result := Some((r0.value, r1.value, r2.value, r3.value));
+        }
+    }
+
+    datatype Tuple5Transformable<A, B, C, D, E> extends Transformable<(A, B, C, D, E)> =
+        Tuple5T(g0: Arbitrary<A>, g1: Arbitrary<B>, g2: Arbitrary<C>, g3: Arbitrary<D>,
+                g4: Arbitrary<E>, ghost h: nat)
+    {
+        ghost function Height(): nat { h }
+        ghost predicate Valid()
+            decreases Height(), 0
+        {
+            g0.internalFunction.Height() < h && g1.internalFunction.Height() < h &&
+            g2.internalFunction.Height() < h && g3.internalFunction.Height() < h &&
+            g4.internalFunction.Height() < h &&
+            g0.Valid() && g1.Valid() && g2.Valid() && g3.Valid() && g4.Valid()
+        }
+        method Apply(tc: TestCase) returns (result: Option<(A, B, C, D, E)>)
+            requires allocated(tc) requires tc.Valid() requires this.Valid()
+            ensures tc.Valid() ensures tc.repr == old(tc.repr)
+            ensures |tc.choices| >= old(|tc.choices|) ensures tc.maxSize == old(tc.maxSize)
+            decreases tc.maxSize - |tc.choices|, Height(), 0 modifies tc, tc.random
+        {
+            var r0 := g0.internalFunction.Apply(tc); if r0.None? { return None; }
+            var r1 := g1.internalFunction.Apply(tc); if r1.None? { return None; }
+            var r2 := g2.internalFunction.Apply(tc); if r2.None? { return None; }
+            var r3 := g3.internalFunction.Apply(tc); if r3.None? { return None; }
+            var r4 := g4.internalFunction.Apply(tc); if r4.None? { return None; }
+            result := Some((r0.value, r1.value, r2.value, r3.value, r4.value));
+        }
+    }
+
+    datatype Tuple6Transformable<A, B, C, D, E, F> extends Transformable<(A, B, C, D, E, F)> =
+        Tuple6T(g0: Arbitrary<A>, g1: Arbitrary<B>, g2: Arbitrary<C>, g3: Arbitrary<D>,
+                g4: Arbitrary<E>, g5: Arbitrary<F>, ghost h: nat)
+    {
+        ghost function Height(): nat { h }
+        ghost predicate Valid()
+            decreases Height(), 0
+        {
+            g0.internalFunction.Height() < h && g1.internalFunction.Height() < h &&
+            g2.internalFunction.Height() < h && g3.internalFunction.Height() < h &&
+            g4.internalFunction.Height() < h && g5.internalFunction.Height() < h &&
+            g0.Valid() && g1.Valid() && g2.Valid() && g3.Valid() && g4.Valid() && g5.Valid()
+        }
+        method Apply(tc: TestCase) returns (result: Option<(A, B, C, D, E, F)>)
+            requires allocated(tc) requires tc.Valid() requires this.Valid()
+            ensures tc.Valid() ensures tc.repr == old(tc.repr)
+            ensures |tc.choices| >= old(|tc.choices|) ensures tc.maxSize == old(tc.maxSize)
+            decreases tc.maxSize - |tc.choices|, Height(), 0 modifies tc, tc.random
+        {
+            var r0 := g0.internalFunction.Apply(tc); if r0.None? { return None; }
+            var r1 := g1.internalFunction.Apply(tc); if r1.None? { return None; }
+            var r2 := g2.internalFunction.Apply(tc); if r2.None? { return None; }
+            var r3 := g3.internalFunction.Apply(tc); if r3.None? { return None; }
+            var r4 := g4.internalFunction.Apply(tc); if r4.None? { return None; }
+            var r5 := g5.internalFunction.Apply(tc); if r5.None? { return None; }
+            result := Some((r0.value, r1.value, r2.value, r3.value, r4.value, r5.value));
+        }
+    }
+
+    datatype Tuple7Transformable<A, B, C, D, E, F, G> extends Transformable<(A, B, C, D, E, F, G)> =
+        Tuple7T(g0: Arbitrary<A>, g1: Arbitrary<B>, g2: Arbitrary<C>, g3: Arbitrary<D>,
+                g4: Arbitrary<E>, g5: Arbitrary<F>, g6: Arbitrary<G>, ghost h: nat)
+    {
+        ghost function Height(): nat { h }
+        ghost predicate Valid()
+            decreases Height(), 0
+        {
+            g0.internalFunction.Height() < h && g1.internalFunction.Height() < h &&
+            g2.internalFunction.Height() < h && g3.internalFunction.Height() < h &&
+            g4.internalFunction.Height() < h && g5.internalFunction.Height() < h &&
+            g6.internalFunction.Height() < h &&
+            g0.Valid() && g1.Valid() && g2.Valid() && g3.Valid() && g4.Valid() && g5.Valid() && g6.Valid()
+        }
+        method Apply(tc: TestCase) returns (result: Option<(A, B, C, D, E, F, G)>)
+            requires allocated(tc) requires tc.Valid() requires this.Valid()
+            ensures tc.Valid() ensures tc.repr == old(tc.repr)
+            ensures |tc.choices| >= old(|tc.choices|) ensures tc.maxSize == old(tc.maxSize)
+            decreases tc.maxSize - |tc.choices|, Height(), 0 modifies tc, tc.random
+        {
+            var r0 := g0.internalFunction.Apply(tc); if r0.None? { return None; }
+            var r1 := g1.internalFunction.Apply(tc); if r1.None? { return None; }
+            var r2 := g2.internalFunction.Apply(tc); if r2.None? { return None; }
+            var r3 := g3.internalFunction.Apply(tc); if r3.None? { return None; }
+            var r4 := g4.internalFunction.Apply(tc); if r4.None? { return None; }
+            var r5 := g5.internalFunction.Apply(tc); if r5.None? { return None; }
+            var r6 := g6.internalFunction.Apply(tc); if r6.None? { return None; }
+            result := Some((r0.value, r1.value, r2.value, r3.value, r4.value, r5.value, r6.value));
+        }
+    }
+
+    datatype Tuple8Transformable<A, B, C, D, E, F, G, H> extends Transformable<(A, B, C, D, E, F, G, H)> =
+        Tuple8T(g0: Arbitrary<A>, g1: Arbitrary<B>, g2: Arbitrary<C>, g3: Arbitrary<D>,
+                g4: Arbitrary<E>, g5: Arbitrary<F>, g6: Arbitrary<G>, g7: Arbitrary<H>, ghost h: nat)
+    {
+        ghost function Height(): nat { h }
+        ghost predicate Valid()
+            decreases Height(), 0
+        {
+            g0.internalFunction.Height() < h && g1.internalFunction.Height() < h &&
+            g2.internalFunction.Height() < h && g3.internalFunction.Height() < h &&
+            g4.internalFunction.Height() < h && g5.internalFunction.Height() < h &&
+            g6.internalFunction.Height() < h && g7.internalFunction.Height() < h &&
+            g0.Valid() && g1.Valid() && g2.Valid() && g3.Valid() &&
+            g4.Valid() && g5.Valid() && g6.Valid() && g7.Valid()
+        }
+        method Apply(tc: TestCase) returns (result: Option<(A, B, C, D, E, F, G, H)>)
+            requires allocated(tc) requires tc.Valid() requires this.Valid()
+            ensures tc.Valid() ensures tc.repr == old(tc.repr)
+            ensures |tc.choices| >= old(|tc.choices|) ensures tc.maxSize == old(tc.maxSize)
+            decreases tc.maxSize - |tc.choices|, Height(), 0 modifies tc, tc.random
+        {
+            var r0 := g0.internalFunction.Apply(tc); if r0.None? { return None; }
+            var r1 := g1.internalFunction.Apply(tc); if r1.None? { return None; }
+            var r2 := g2.internalFunction.Apply(tc); if r2.None? { return None; }
+            var r3 := g3.internalFunction.Apply(tc); if r3.None? { return None; }
+            var r4 := g4.internalFunction.Apply(tc); if r4.None? { return None; }
+            var r5 := g5.internalFunction.Apply(tc); if r5.None? { return None; }
+            var r6 := g6.internalFunction.Apply(tc); if r6.None? { return None; }
+            var r7 := g7.internalFunction.Apply(tc); if r7.None? { return None; }
+            result := Some((r0.value, r1.value, r2.value, r3.value, r4.value, r5.value, r6.value, r7.value));
+        }
+    }
+
+    datatype Tuple9Transformable<A, B, C, D, E, F, G, H, I> extends Transformable<(A, B, C, D, E, F, G, H, I)> =
+        Tuple9T(g0: Arbitrary<A>, g1: Arbitrary<B>, g2: Arbitrary<C>, g3: Arbitrary<D>,
+                g4: Arbitrary<E>, g5: Arbitrary<F>, g6: Arbitrary<G>, g7: Arbitrary<H>,
+                g8: Arbitrary<I>, ghost h: nat)
+    {
+        ghost function Height(): nat { h }
+        ghost predicate Valid()
+            decreases Height(), 0
+        {
+            g0.internalFunction.Height() < h && g1.internalFunction.Height() < h &&
+            g2.internalFunction.Height() < h && g3.internalFunction.Height() < h &&
+            g4.internalFunction.Height() < h && g5.internalFunction.Height() < h &&
+            g6.internalFunction.Height() < h && g7.internalFunction.Height() < h &&
+            g8.internalFunction.Height() < h &&
+            g0.Valid() && g1.Valid() && g2.Valid() && g3.Valid() &&
+            g4.Valid() && g5.Valid() && g6.Valid() && g7.Valid() && g8.Valid()
+        }
+        method Apply(tc: TestCase) returns (result: Option<(A, B, C, D, E, F, G, H, I)>)
+            requires allocated(tc) requires tc.Valid() requires this.Valid()
+            ensures tc.Valid() ensures tc.repr == old(tc.repr)
+            ensures |tc.choices| >= old(|tc.choices|) ensures tc.maxSize == old(tc.maxSize)
+            decreases tc.maxSize - |tc.choices|, Height(), 0 modifies tc, tc.random
+        {
+            var r0 := g0.internalFunction.Apply(tc); if r0.None? { return None; }
+            var r1 := g1.internalFunction.Apply(tc); if r1.None? { return None; }
+            var r2 := g2.internalFunction.Apply(tc); if r2.None? { return None; }
+            var r3 := g3.internalFunction.Apply(tc); if r3.None? { return None; }
+            var r4 := g4.internalFunction.Apply(tc); if r4.None? { return None; }
+            var r5 := g5.internalFunction.Apply(tc); if r5.None? { return None; }
+            var r6 := g6.internalFunction.Apply(tc); if r6.None? { return None; }
+            var r7 := g7.internalFunction.Apply(tc); if r7.None? { return None; }
+            var r8 := g8.internalFunction.Apply(tc); if r8.None? { return None; }
+            result := Some((r0.value, r1.value, r2.value, r3.value, r4.value, r5.value, r6.value, r7.value, r8.value));
+        }
+    }
+
+    datatype Tuple10Transformable<A, B, C, D, E, F, G, H, I, J> extends Transformable<(A, B, C, D, E, F, G, H, I, J)> =
+        Tuple10T(g0: Arbitrary<A>, g1: Arbitrary<B>, g2: Arbitrary<C>, g3: Arbitrary<D>,
+                 g4: Arbitrary<E>, g5: Arbitrary<F>, g6: Arbitrary<G>, g7: Arbitrary<H>,
+                 g8: Arbitrary<I>, g9: Arbitrary<J>, ghost h: nat)
+    {
+        ghost function Height(): nat { h }
+        ghost predicate Valid()
+            decreases Height(), 0
+        {
+            g0.internalFunction.Height() < h && g1.internalFunction.Height() < h &&
+            g2.internalFunction.Height() < h && g3.internalFunction.Height() < h &&
+            g4.internalFunction.Height() < h && g5.internalFunction.Height() < h &&
+            g6.internalFunction.Height() < h && g7.internalFunction.Height() < h &&
+            g8.internalFunction.Height() < h && g9.internalFunction.Height() < h &&
+            g0.Valid() && g1.Valid() && g2.Valid() && g3.Valid() && g4.Valid() &&
+            g5.Valid() && g6.Valid() && g7.Valid() && g8.Valid() && g9.Valid()
+        }
+        method Apply(tc: TestCase) returns (result: Option<(A, B, C, D, E, F, G, H, I, J)>)
+            requires allocated(tc) requires tc.Valid() requires this.Valid()
+            ensures tc.Valid() ensures tc.repr == old(tc.repr)
+            ensures |tc.choices| >= old(|tc.choices|) ensures tc.maxSize == old(tc.maxSize)
+            decreases tc.maxSize - |tc.choices|, Height(), 0 modifies tc, tc.random
+        {
+            var r0 := g0.internalFunction.Apply(tc); if r0.None? { return None; }
+            var r1 := g1.internalFunction.Apply(tc); if r1.None? { return None; }
+            var r2 := g2.internalFunction.Apply(tc); if r2.None? { return None; }
+            var r3 := g3.internalFunction.Apply(tc); if r3.None? { return None; }
+            var r4 := g4.internalFunction.Apply(tc); if r4.None? { return None; }
+            var r5 := g5.internalFunction.Apply(tc); if r5.None? { return None; }
+            var r6 := g6.internalFunction.Apply(tc); if r6.None? { return None; }
+            var r7 := g7.internalFunction.Apply(tc); if r7.None? { return None; }
+            var r8 := g8.internalFunction.Apply(tc); if r8.None? { return None; }
+            var r9 := g9.internalFunction.Apply(tc); if r9.None? { return None; }
+            result := Some((r0.value, r1.value, r2.value, r3.value, r4.value, r5.value, r6.value, r7.value, r8.value, r9.value));
+        }
+    }
+
+
+    // Still a reference trait: a FlatMapFn is a stateful factory (a closure-like
+    // object), so it is pinned to `object` and held by reference inside the
+    // FlatMap datatype below.
+    trait FlatMapFn<T, U> extends object {
         // This method creates a new Arbitrary<U> based on an input T
         method CreateArbitrary(t: T) returns (p: Arbitrary<U>)
             ensures p.Valid()
-            ensures fresh(p.internalFunction.repr)
     }
 
-    class FlatMapTransformable<T, U> extends Transformable<U> {
-        var baseGenerator: Arbitrary<T> // The original generator
-        var flatMapFn: FlatMapFn<T, U> // The factory function
-
-        constructor(baseGenerator: Arbitrary<T>, flatMapFn: FlatMapFn<T, U>)
-            requires baseGenerator.Valid()
-            requires flatMapFn !in baseGenerator.internalFunction.repr
-            ensures fresh(this)
-            ensures this.childRepr == baseGenerator.internalFunction.repr+{flatMapFn}
-            ensures Valid()
-        {
-            this.baseGenerator := baseGenerator;
-            this.flatMapFn := flatMapFn;
-            this.childRepr := baseGenerator.internalFunction.repr+{flatMapFn};
-            this.repr := {this} + this.childRepr;
-        }
-
+    datatype FlatMapTransformable<!T, U> extends Transformable<U> = FlatMapT(baseGenerator: Arbitrary<T>, flatMapFn: FlatMapFn<T, U>, ghost h: nat) {
+        ghost function Height(): nat { h }
         ghost predicate Valid()
-            reads this, repr, childRepr
-            ensures Valid() ==> this in repr
-            ensures Valid() ==> childRepr < this.repr
-            ensures Valid() ==> this.repr == {this} + childRepr
-            decreases repr, childRepr, 0
+            decreases Height(), 0
         {
-            this in repr && this.repr == {this} + childRepr &&
-            childRepr < repr &&
-            baseGenerator.internalFunction in childRepr &&
-            baseGenerator.internalFunction.repr < childRepr &&
+            baseGenerator.internalFunction.Height() < h &&
             baseGenerator.Valid()
         }
 
@@ -876,25 +913,21 @@ module Arbitraries {
             requires allocated(tc)
             requires tc.Valid()
             requires this.Valid()
-            requires tc.repr !! this.repr
-            ensures this.Valid()
             ensures tc.Valid()
             ensures tc.repr == old(tc.repr)
             ensures |tc.choices| >= old(|tc.choices|)
             ensures tc.maxSize == old(tc.maxSize)
-            ensures this.repr == old(this.repr)
-            decreases tc.maxSize - |tc.choices|, repr, childRepr
+            decreases tc.maxSize - |tc.choices|, Height(), 0
             modifies tc, tc.random
         {
             var intermediateValue := baseGenerator.internalFunction.Apply(tc); // First, generate T
             if intermediateValue.None? { return None; }                       // base overran: abort
             var nextArbitrary := flatMapFn.CreateArbitrary(intermediateValue.value); // Then, create Arbitrary<U>
-            assert tc.repr !! nextArbitrary.internalFunction.repr; // fresh repr is disjoint from the pre-existing tc
             // Draw a control marker so the buffer STRICTLY drops before dispatching into the
-            // freshly-created nextArbitrary (which is not in our repr, so repr can't break the
-            // tie). This is the finite-buffer bound: each flatMap bind consumes >= 1 choice, so
-            // the maxSize - |choices| metric decreases. On exhaustion the bind aborts (None),
-            // mirroring Hypothesis raising StopTest rather than completing an overrun draw.
+            // freshly-created nextArbitrary. This is the finite-buffer bound: each flatMap bind
+            // consumes >= 1 choice, so the maxSize - |choices| metric decreases. On exhaustion the
+            // bind aborts (None), mirroring Hypothesis raising StopTest rather than completing an
+            // overrun draw.
             var marker := tc.MakeChoice(2);
             if marker.value.None? { return None; }
             result := nextArbitrary.internalFunction.Apply(tc);
@@ -904,49 +937,23 @@ module Arbitraries {
     // Heap-allocated 1-D array generator. Mirrors ListsTransformable to build a
     // seq<S>, then copies it into a freshly-allocated array (the trait's Apply
     // places no constraint on `result`, so returning a fresh array is sound).
-    class ArraysTransformable<S> extends Transformable<array<S>> {
-        var elementGenerator: Arbitrary<S>
-        var minSize: int
-        var maxSize: int
-        constructor(elementGenerator: Arbitrary<S>, minSize: int, maxSize: int)
-            requires 0 <= minSize <= maxSize
-            requires elementGenerator.Valid()
-            ensures elementGenerator.internalFunction.repr < this.repr
-            ensures this.repr == {this}+elementGenerator.internalFunction.repr
-            ensures fresh(this)
-            ensures Valid()
-        {
-            this.elementGenerator := elementGenerator;
-            this.minSize := minSize;
-            this.maxSize := maxSize;
-            this.childRepr := elementGenerator.internalFunction.repr;
-            this.repr := {this} + this.childRepr;
-        }
+    datatype ArraysTransformable<S> extends Transformable<array<S>> = ArraysT(elementGenerator: Arbitrary<S>, minSize: int, maxSize: int, ghost h: nat) {
+        ghost function Height(): nat { h }
         ghost predicate Valid()
-            decreases repr, childRepr, 0
-            ensures Valid() ==> this in repr
-            ensures Valid() ==> childRepr < this.repr
-            ensures Valid() ==> this.repr == {this} + childRepr
-            reads this, repr, childRepr
+            decreases Height(), 0
         {
-            this in this.repr &&
-            elementGenerator.internalFunction in this.repr &&
-            elementGenerator.internalFunction.repr < this.repr &&
-            0 <= minSize <= maxSize && elementGenerator.Valid() &&
-            childRepr < this.repr && this.repr == {this} + childRepr
+            elementGenerator.internalFunction.Height() < h &&
+            0 <= minSize <= maxSize && elementGenerator.Valid()
         }
         method Apply(tc: TestCase) returns (result: Option<array<S>>)
             requires allocated(tc)
             requires tc.Valid()
             requires this.Valid()
-            requires tc.repr !! this.repr
-            ensures this.Valid()
             ensures tc.Valid()
             ensures tc.repr == old(tc.repr)
             ensures |tc.choices| >= old(|tc.choices|)
             ensures tc.maxSize == old(tc.maxSize)
-            ensures this.repr == old(this.repr)
-            decreases tc.maxSize - |tc.choices|, repr, childRepr
+            decreases tc.maxSize - |tc.choices|, Height(), 0
             modifies tc, tc.random
         {
             var xs: seq<S> := [];
@@ -984,49 +991,24 @@ module Arbitraries {
     // array has exactly that shape. Elements are generated into a flat seq and
     // read through a guarded init function (so no nonlinear index-bound proof is
     // needed); the flat seq always covers the whole array.
-    class Array2Transformable<S> extends Transformable<array2<S>> {
-        var elementGenerator: Arbitrary<S>
-        var rows: nat
-        var cols: nat
-        constructor(elementGenerator: Arbitrary<S>, rows: nat, cols: nat)
-            requires elementGenerator.Valid()
-            ensures elementGenerator.internalFunction.repr < this.repr
-            ensures this.repr == {this}+elementGenerator.internalFunction.repr
-            ensures fresh(this)
-            ensures Valid()
-        {
-            this.elementGenerator := elementGenerator;
-            this.rows := rows;
-            this.cols := cols;
-            this.childRepr := elementGenerator.internalFunction.repr;
-            this.repr := {this} + this.childRepr;
-        }
+    datatype Array2Transformable<S> extends Transformable<array2<S>> = Array2T(elementGenerator: Arbitrary<S>, rows: nat, cols: nat, ghost h: nat) {
+        ghost function Height(): nat { h }
         ghost predicate Valid()
-            decreases repr, childRepr, 0
-            ensures Valid() ==> this in repr
-            ensures Valid() ==> childRepr < this.repr
-            ensures Valid() ==> this.repr == {this} + childRepr
-            reads this, repr, childRepr
+            decreases Height(), 0
         {
-            this in this.repr &&
-            elementGenerator.internalFunction in this.repr &&
-            elementGenerator.internalFunction.repr < this.repr &&
-            elementGenerator.Valid() &&
-            childRepr < this.repr && this.repr == {this} + childRepr
+            elementGenerator.internalFunction.Height() < h &&
+            elementGenerator.Valid()
         }
         method {:isolate_assertions} Apply(tc: TestCase) returns (result: Option<array2<S>>)
             requires allocated(tc)
             requires tc.Valid()
             requires this.Valid()
-            requires tc.repr !! this.repr
-            ensures this.Valid()
             ensures tc.Valid()
             ensures tc.repr == old(tc.repr)
             ensures |tc.choices| >= old(|tc.choices|)
             ensures tc.maxSize == old(tc.maxSize)
-            ensures this.repr == old(this.repr)
             ensures result.Some? ==> result.value.Length0 == rows && result.value.Length1 == cols
-            decreases tc.maxSize - |tc.choices|, repr, childRepr
+            decreases tc.maxSize - |tc.choices|, Height(), 0
             modifies tc, tc.random
         {
             var m: nat := rows;
@@ -1054,51 +1036,24 @@ module Arbitraries {
         }
     }
 
-    class Array3Transformable<S> extends Transformable<array3<S>> {
-        var elementGenerator: Arbitrary<S>
-        var rows: nat
-        var cols: nat
-        var layers: nat
-        constructor(elementGenerator: Arbitrary<S>, rows: nat, cols: nat, layers: nat)
-            requires elementGenerator.Valid()
-            ensures elementGenerator.internalFunction.repr < this.repr
-            ensures this.repr == {this}+elementGenerator.internalFunction.repr
-            ensures fresh(this)
-            ensures Valid()
-        {
-            this.elementGenerator := elementGenerator;
-            this.rows := rows;
-            this.cols := cols;
-            this.layers := layers;
-            this.childRepr := elementGenerator.internalFunction.repr;
-            this.repr := {this} + this.childRepr;
-        }
+    datatype Array3Transformable<S> extends Transformable<array3<S>> = Array3T(elementGenerator: Arbitrary<S>, rows: nat, cols: nat, layers: nat, ghost h: nat) {
+        ghost function Height(): nat { h }
         ghost predicate Valid()
-            decreases repr, childRepr, 0
-            ensures Valid() ==> this in repr
-            ensures Valid() ==> childRepr < this.repr
-            ensures Valid() ==> this.repr == {this} + childRepr
-            reads this, repr, childRepr
+            decreases Height(), 0
         {
-            this in this.repr &&
-            elementGenerator.internalFunction in this.repr &&
-            elementGenerator.internalFunction.repr < this.repr &&
-            elementGenerator.Valid() &&
-            childRepr < this.repr && this.repr == {this} + childRepr
+            elementGenerator.internalFunction.Height() < h &&
+            elementGenerator.Valid()
         }
         method {:isolate_assertions} Apply(tc: TestCase) returns (result: Option<array3<S>>)
             requires allocated(tc)
             requires tc.Valid()
             requires this.Valid()
-            requires tc.repr !! this.repr
-            ensures this.Valid()
             ensures tc.Valid()
             ensures tc.repr == old(tc.repr)
             ensures |tc.choices| >= old(|tc.choices|)
             ensures tc.maxSize == old(tc.maxSize)
-            ensures this.repr == old(this.repr)
             ensures result.Some? ==> result.value.Length0 == rows && result.value.Length1 == cols && result.value.Length2 == layers
-            decreases tc.maxSize - |tc.choices|, repr, childRepr
+            decreases tc.maxSize - |tc.choices|, Height(), 0
             modifies tc, tc.random
         {
             var m: nat := rows;
@@ -1139,38 +1094,22 @@ module Arbitraries {
 
     // Natural numbers in [0, bound). `bound` is informational; values are
     // drawn modulo it at runtime (bv64 -> nat is always nonnegative).
-    class NatsTransformable extends Transformable<nat> {
-        var bound: nat
-        constructor(bound: nat)
-            requires 0 < bound <= MaxChoice
-            ensures fresh(this)
-            ensures fresh(this.repr)
-            ensures Valid()
-        {
-            this.bound := bound;
-            this.childRepr := {};
-            this.repr := {this} + this.childRepr;
-        }
+    datatype NatsTransformable extends Transformable<nat> = NatsT(bound: nat) {
+        ghost function Height(): nat { 0 }
         ghost predicate Valid()
-            reads this
-            ensures Valid() ==> this in repr
-            ensures Valid() ==> childRepr < this.repr
-            ensures Valid() ==> this.repr == {this} + childRepr
-            decreases repr, childRepr, 0
+            decreases Height(), 0
         {
-            this.repr == {this} + childRepr && childRepr < this.repr && 0 < bound <= MaxChoice
+            0 < bound <= MaxChoice
         }
         method Apply(tc: TestCase) returns (result: Option<nat>)
             requires allocated(tc)
             requires this.Valid()
-            requires tc.repr !! this.repr
-            ensures this.repr == old(this.repr)
             requires tc.Valid()
             ensures tc.Valid()
             ensures tc.repr == old(tc.repr)
             ensures |tc.choices| >= old(|tc.choices|)
             ensures tc.maxSize == old(tc.maxSize)
-            decreases tc.maxSize - |tc.choices|, repr, childRepr
+            decreases tc.maxSize - |tc.choices|, Height(), 0
             modifies tc, tc.random
         {
             var c := tc.MakeChoice(bound as Choice);
@@ -1183,35 +1122,22 @@ module Arbitraries {
     }
 
     // Printable-ASCII characters in [32, 127).
-    class CharsTransformable extends Transformable<char> {
-        constructor()
-            ensures fresh(this)
-            ensures fresh(this.repr)
-            ensures Valid()
-        {
-            this.childRepr := {};
-            this.repr := {this} + this.childRepr;
-        }
+    datatype CharsTransformable extends Transformable<char> = CharsT {
+        ghost function Height(): nat { 0 }
         ghost predicate Valid()
-            reads this
-            ensures Valid() ==> this in repr
-            ensures Valid() ==> childRepr < this.repr
-            ensures Valid() ==> this.repr == {this} + childRepr
-            decreases repr, childRepr, 0
+            decreases Height(), 0
         {
-            this.repr == {this} + childRepr && childRepr < this.repr
+            true
         }
         method Apply(tc: TestCase) returns (result: Option<char>)
             requires allocated(tc)
             requires this.Valid()
-            requires tc.repr !! this.repr
-            ensures this.repr == old(this.repr)
             requires tc.Valid()
             ensures tc.Valid()
             ensures tc.repr == old(tc.repr)
             ensures |tc.choices| >= old(|tc.choices|)
             ensures tc.maxSize == old(tc.maxSize)
-            decreases tc.maxSize - |tc.choices|, repr, childRepr
+            decreases tc.maxSize - |tc.choices|, Height(), 0
             modifies tc, tc.random
         {
             var c := tc.MakeChoice(95);
@@ -1223,35 +1149,22 @@ module Arbitraries {
     }
 
     // Non-negative rationals, generated as numerator / (denominator + 1).
-    class RealsTransformable extends Transformable<real> {
-        constructor()
-            ensures fresh(this)
-            ensures fresh(this.repr)
-            ensures Valid()
-        {
-            this.childRepr := {};
-            this.repr := {this} + this.childRepr;
-        }
+    datatype RealsTransformable extends Transformable<real> = RealsT {
+        ghost function Height(): nat { 0 }
         ghost predicate Valid()
-            reads this
-            ensures Valid() ==> this in repr
-            ensures Valid() ==> childRepr < this.repr
-            ensures Valid() ==> this.repr == {this} + childRepr
-            decreases repr, childRepr, 0
+            decreases Height(), 0
         {
-            this.repr == {this} + childRepr && childRepr < this.repr
+            true
         }
         method Apply(tc: TestCase) returns (result: Option<real>)
             requires allocated(tc)
             requires this.Valid()
-            requires tc.repr !! this.repr
-            ensures this.repr == old(this.repr)
             requires tc.Valid()
             ensures tc.Valid()
             ensures tc.repr == old(tc.repr)
             ensures |tc.choices| >= old(|tc.choices|)
             ensures tc.maxSize == old(tc.maxSize)
-            decreases tc.maxSize - |tc.choices|, repr, childRepr
+            decreases tc.maxSize - |tc.choices|, Height(), 0
             modifies tc, tc.random
         {
             var cn := tc.MakeChoice(1000000);
@@ -1269,23 +1182,17 @@ module Arbitraries {
     // narrow it (bound discharged by {:axiom} like the char path); 128 and 256
     // assemble multiple 64-bit words with widening casts (no bound needed).
     // ----------------------------------------------------------------
-    class BitVectors1Transformable extends Transformable<bv1> {
-        constructor() ensures fresh(this) ensures fresh(this.repr) ensures Valid()
-        { this.childRepr := {}; this.repr := {this} + this.childRepr; }
+    datatype BitVectors1Transformable extends Transformable<bv1> = BV1T {
+        ghost function Height(): nat { 0 }
         ghost predicate Valid()
-            reads this
-            ensures Valid() ==> this in repr
-            ensures Valid() ==> childRepr < this.repr
-            ensures Valid() ==> this.repr == {this} + childRepr
-            decreases repr, childRepr, 0
-        { this.repr == {this} + childRepr && childRepr < this.repr }
+            decreases Height(), 0
+        { true }
         method Apply(tc: TestCase) returns (result: Option<bv1>)
-            requires allocated(tc) requires this.Valid() requires tc.repr !! this.repr
-            ensures this.repr == old(this.repr)
+            requires allocated(tc) requires this.Valid()
             requires tc.Valid() ensures tc.Valid() ensures tc.repr == old(tc.repr)
             ensures |tc.choices| >= old(|tc.choices|)
             ensures tc.maxSize == old(tc.maxSize)
-            decreases tc.maxSize - |tc.choices|, repr, childRepr modifies tc, tc.random
+            decreases tc.maxSize - |tc.choices|, Height(), 0 modifies tc, tc.random
         {
             var c := tc.MakeChoice(2);
             var v := if c.value.Some? then c.Unwrap() else 0;
@@ -1294,23 +1201,17 @@ module Arbitraries {
         }
     }
 
-    class BitVectors2Transformable extends Transformable<bv2> {
-        constructor() ensures fresh(this) ensures fresh(this.repr) ensures Valid()
-        { this.childRepr := {}; this.repr := {this} + this.childRepr; }
+    datatype BitVectors2Transformable extends Transformable<bv2> = BV2T {
+        ghost function Height(): nat { 0 }
         ghost predicate Valid()
-            reads this
-            ensures Valid() ==> this in repr
-            ensures Valid() ==> childRepr < this.repr
-            ensures Valid() ==> this.repr == {this} + childRepr
-            decreases repr, childRepr, 0
-        { this.repr == {this} + childRepr && childRepr < this.repr }
+            decreases Height(), 0
+        { true }
         method Apply(tc: TestCase) returns (result: Option<bv2>)
-            requires allocated(tc) requires this.Valid() requires tc.repr !! this.repr
-            ensures this.repr == old(this.repr)
+            requires allocated(tc) requires this.Valid()
             requires tc.Valid() ensures tc.Valid() ensures tc.repr == old(tc.repr)
             ensures |tc.choices| >= old(|tc.choices|)
             ensures tc.maxSize == old(tc.maxSize)
-            decreases tc.maxSize - |tc.choices|, repr, childRepr modifies tc, tc.random
+            decreases tc.maxSize - |tc.choices|, Height(), 0 modifies tc, tc.random
         {
             var c := tc.MakeChoice(4);
             var v := if c.value.Some? then c.Unwrap() else 0;
@@ -1319,23 +1220,17 @@ module Arbitraries {
         }
     }
 
-    class BitVectors8Transformable extends Transformable<bv8> {
-        constructor() ensures fresh(this) ensures fresh(this.repr) ensures Valid()
-        { this.childRepr := {}; this.repr := {this} + this.childRepr; }
+    datatype BitVectors8Transformable extends Transformable<bv8> = BV8T {
+        ghost function Height(): nat { 0 }
         ghost predicate Valid()
-            reads this
-            ensures Valid() ==> this in repr
-            ensures Valid() ==> childRepr < this.repr
-            ensures Valid() ==> this.repr == {this} + childRepr
-            decreases repr, childRepr, 0
-        { this.repr == {this} + childRepr && childRepr < this.repr }
+            decreases Height(), 0
+        { true }
         method Apply(tc: TestCase) returns (result: Option<bv8>)
-            requires allocated(tc) requires this.Valid() requires tc.repr !! this.repr
-            ensures this.repr == old(this.repr)
+            requires allocated(tc) requires this.Valid()
             requires tc.Valid() ensures tc.Valid() ensures tc.repr == old(tc.repr)
             ensures |tc.choices| >= old(|tc.choices|)
             ensures tc.maxSize == old(tc.maxSize)
-            decreases tc.maxSize - |tc.choices|, repr, childRepr modifies tc, tc.random
+            decreases tc.maxSize - |tc.choices|, Height(), 0 modifies tc, tc.random
         {
             var c := tc.MakeChoice(256);
             var v := if c.value.Some? then c.Unwrap() else 0;
@@ -1344,23 +1239,17 @@ module Arbitraries {
         }
     }
 
-    class BitVectors16Transformable extends Transformable<bv16> {
-        constructor() ensures fresh(this) ensures fresh(this.repr) ensures Valid()
-        { this.childRepr := {}; this.repr := {this} + this.childRepr; }
+    datatype BitVectors16Transformable extends Transformable<bv16> = BV16T {
+        ghost function Height(): nat { 0 }
         ghost predicate Valid()
-            reads this
-            ensures Valid() ==> this in repr
-            ensures Valid() ==> childRepr < this.repr
-            ensures Valid() ==> this.repr == {this} + childRepr
-            decreases repr, childRepr, 0
-        { this.repr == {this} + childRepr && childRepr < this.repr }
+            decreases Height(), 0
+        { true }
         method Apply(tc: TestCase) returns (result: Option<bv16>)
-            requires allocated(tc) requires this.Valid() requires tc.repr !! this.repr
-            ensures this.repr == old(this.repr)
+            requires allocated(tc) requires this.Valid()
             requires tc.Valid() ensures tc.Valid() ensures tc.repr == old(tc.repr)
             ensures |tc.choices| >= old(|tc.choices|)
             ensures tc.maxSize == old(tc.maxSize)
-            decreases tc.maxSize - |tc.choices|, repr, childRepr modifies tc, tc.random
+            decreases tc.maxSize - |tc.choices|, Height(), 0 modifies tc, tc.random
         {
             var c := tc.MakeChoice(0x10000);
             var v := if c.value.Some? then c.Unwrap() else 0;
@@ -1369,23 +1258,17 @@ module Arbitraries {
         }
     }
 
-    class BitVectors32Transformable extends Transformable<bv32> {
-        constructor() ensures fresh(this) ensures fresh(this.repr) ensures Valid()
-        { this.childRepr := {}; this.repr := {this} + this.childRepr; }
+    datatype BitVectors32Transformable extends Transformable<bv32> = BV32T {
+        ghost function Height(): nat { 0 }
         ghost predicate Valid()
-            reads this
-            ensures Valid() ==> this in repr
-            ensures Valid() ==> childRepr < this.repr
-            ensures Valid() ==> this.repr == {this} + childRepr
-            decreases repr, childRepr, 0
-        { this.repr == {this} + childRepr && childRepr < this.repr }
+            decreases Height(), 0
+        { true }
         method Apply(tc: TestCase) returns (result: Option<bv32>)
-            requires allocated(tc) requires this.Valid() requires tc.repr !! this.repr
-            ensures this.repr == old(this.repr)
+            requires allocated(tc) requires this.Valid()
             requires tc.Valid() ensures tc.Valid() ensures tc.repr == old(tc.repr)
             ensures |tc.choices| >= old(|tc.choices|)
             ensures tc.maxSize == old(tc.maxSize)
-            decreases tc.maxSize - |tc.choices|, repr, childRepr modifies tc, tc.random
+            decreases tc.maxSize - |tc.choices|, Height(), 0 modifies tc, tc.random
         {
             // The native lane only spans 31 bits, so assemble 32 bits from two 16-bit
             // Choice chunks. Each chunk is < 2^16 (MakeChoice rejects >= n), so the
@@ -1398,23 +1281,17 @@ module Arbitraries {
         }
     }
 
-    class BitVectors64Transformable extends Transformable<bv64> {
-        constructor() ensures fresh(this) ensures fresh(this.repr) ensures Valid()
-        { this.childRepr := {}; this.repr := {this} + this.childRepr; }
+    datatype BitVectors64Transformable extends Transformable<bv64> = BV64T {
+        ghost function Height(): nat { 0 }
         ghost predicate Valid()
-            reads this
-            ensures Valid() ==> this in repr
-            ensures Valid() ==> childRepr < this.repr
-            ensures Valid() ==> this.repr == {this} + childRepr
-            decreases repr, childRepr, 0
-        { this.repr == {this} + childRepr && childRepr < this.repr }
+            decreases Height(), 0
+        { true }
         method Apply(tc: TestCase) returns (result: Option<bv64>)
-            requires allocated(tc) requires this.Valid() requires tc.repr !! this.repr
-            ensures this.repr == old(this.repr)
+            requires allocated(tc) requires this.Valid()
             requires tc.Valid() ensures tc.Valid() ensures tc.repr == old(tc.repr)
             ensures |tc.choices| >= old(|tc.choices|)
             ensures tc.maxSize == old(tc.maxSize)
-            decreases tc.maxSize - |tc.choices|, repr, childRepr modifies tc, tc.random
+            decreases tc.maxSize - |tc.choices|, Height(), 0 modifies tc, tc.random
         {
             // 64 bits from four 16-bit Choice chunks (the native lane spans only 31).
             var c0 := tc.MakeChoice(0x10000);
@@ -1430,23 +1307,17 @@ module Arbitraries {
         }
     }
 
-    class BitVectors128Transformable extends Transformable<bv128> {
-        constructor() ensures fresh(this) ensures fresh(this.repr) ensures Valid()
-        { this.childRepr := {}; this.repr := {this} + this.childRepr; }
+    datatype BitVectors128Transformable extends Transformable<bv128> = BV128T {
+        ghost function Height(): nat { 0 }
         ghost predicate Valid()
-            reads this
-            ensures Valid() ==> this in repr
-            ensures Valid() ==> childRepr < this.repr
-            ensures Valid() ==> this.repr == {this} + childRepr
-            decreases repr, childRepr, 0
-        { this.repr == {this} + childRepr && childRepr < this.repr }
+            decreases Height(), 0
+        { true }
         method Apply(tc: TestCase) returns (result: Option<bv128>)
-            requires allocated(tc) requires this.Valid() requires tc.repr !! this.repr
-            ensures this.repr == old(this.repr)
+            requires allocated(tc) requires this.Valid()
             requires tc.Valid() ensures tc.Valid() ensures tc.repr == old(tc.repr)
             ensures |tc.choices| >= old(|tc.choices|)
             ensures tc.maxSize == old(tc.maxSize)
-            decreases tc.maxSize - |tc.choices|, repr, childRepr modifies tc, tc.random
+            decreases tc.maxSize - |tc.choices|, Height(), 0 modifies tc, tc.random
         {
             // 128 bits from eight 16-bit Choice chunks.
             var c0 := tc.MakeChoice(0x10000);
@@ -1472,23 +1343,17 @@ module Arbitraries {
         }
     }
 
-    class BitVectors256Transformable extends Transformable<bv256> {
-        constructor() ensures fresh(this) ensures fresh(this.repr) ensures Valid()
-        { this.childRepr := {}; this.repr := {this} + this.childRepr; }
+    datatype BitVectors256Transformable extends Transformable<bv256> = BV256T {
+        ghost function Height(): nat { 0 }
         ghost predicate Valid()
-            reads this
-            ensures Valid() ==> this in repr
-            ensures Valid() ==> childRepr < this.repr
-            ensures Valid() ==> this.repr == {this} + childRepr
-            decreases repr, childRepr, 0
-        { this.repr == {this} + childRepr && childRepr < this.repr }
+            decreases Height(), 0
+        { true }
         method Apply(tc: TestCase) returns (result: Option<bv256>)
-            requires allocated(tc) requires this.Valid() requires tc.repr !! this.repr
-            ensures this.repr == old(this.repr)
+            requires allocated(tc) requires this.Valid()
             requires tc.Valid() ensures tc.Valid() ensures tc.repr == old(tc.repr)
             ensures |tc.choices| >= old(|tc.choices|)
             ensures tc.maxSize == old(tc.maxSize)
-            decreases tc.maxSize - |tc.choices|, repr, childRepr modifies tc, tc.random
+            decreases tc.maxSize - |tc.choices|, Height(), 0 modifies tc, tc.random
         {
             // 256 bits from sixteen 16-bit Choice chunks.
             var c0 := tc.MakeChoice(0x10000);  var w0 := if c0.value.Some? then c0.Unwrap() else 0;
@@ -1524,6 +1389,26 @@ module Arbitraries {
     function SeqToMap<K, V>(pairs: seq<(K, V)>): map<K, V> {
         if |pairs| == 0 then map[]
         else SeqToMap(pairs[1..])[pairs[0].0 := pairs[0].1]
+    }
+
+    // Max Height over a seq of arbitraries — used by the Mix factory to pick a
+    // datatype Height that dominates all children (so Mix.Valid is well-founded).
+    ghost function MaxArbHeight<T>(s: seq<Arbitrary<T>>): nat {
+        if |s| == 0 then 0
+        else
+            var rest := MaxArbHeight(s[1..]);
+            var hd := s[0].internalFunction.Height();
+            if hd > rest then hd else rest
+    }
+
+    lemma MaxArbHeightUpperBound<T>(s: seq<Arbitrary<T>>, i: int)
+        requires 0 <= i < |s|
+        ensures s[i].internalFunction.Height() <= MaxArbHeight(s)
+    {
+        if i == 0 {
+        } else {
+            MaxArbHeightUpperBound(s[1..], i - 1);
+        }
     }
 
     // ================================================================
@@ -1576,11 +1461,9 @@ module Arbitraries {
         // Fresh + singleton repr so multiple ties are mutually disjoint.
         method Tie(key: string) returns (a: Arbitrary<T>)
             ensures a.Valid()
-            ensures fresh(a.internalFunction)
-            ensures fresh(a.internalFunction.repr)
         {
-            var lz := new LazyArbitrary<T>(this, key);
-            a := Arbitrary(lz);
+            a := Arbitrary(LazyT(this, key));
+            assert a.internalFunction is LazyArbitrary<T>;
         }
 
         function Lookup(key: string): Arbitrary<T>
@@ -1591,45 +1474,27 @@ module Arbitraries {
         }
     }
 
-    class LazyArbitrary<T(!new)> extends Transformable<T> {
-        const registry: Registry<T>
-        const key: string
-
-        constructor(registry: Registry<T>, key: string)
-            ensures fresh(this)
-            ensures fresh(this.repr)
-            ensures Valid()
-        {
-            this.registry := registry;
-            this.key := key;
-            this.childRepr := {};
-            this.repr := {this};
-        }
-
-        // The lazy node owns nothing but itself, so Valid()/repr stay acyclic and
-        // trivially well-formed regardless of the (possibly self-referential)
-        // registry it points into.
+    datatype LazyArbitrary<T(!new)> extends Transformable<T> = LazyT(registry: Registry<T>, key: string) {
+        ghost function Height(): nat { 0 }
+        // The lazy node owns nothing but itself, so Valid() stays trivially
+        // well-formed regardless of the (possibly self-referential) registry it
+        // points into. Termination through the letrec cycle rests entirely on the
+        // buffer metric (the marker draw below), so Height is 0.
         ghost predicate Valid()
-            reads this
-            ensures Valid() ==> this in repr
-            ensures Valid() ==> childRepr < this.repr
-            ensures Valid() ==> this.repr == {this} + childRepr
-            decreases repr, childRepr, 0
+            decreases Height(), 0
         {
-            this.repr == {this} + childRepr && childRepr < this.repr
+            true
         }
 
         method Apply(tc: TestCase) returns (result: Option<T>)
             requires allocated(tc)
             requires this.Valid()
-            requires tc.repr !! this.repr
-            ensures this.repr == old(this.repr)
             requires tc.Valid()
             ensures tc.Valid()
             ensures tc.repr == old(tc.repr)
             ensures |tc.choices| >= old(|tc.choices|)
             ensures tc.maxSize == old(tc.maxSize)
-            decreases tc.maxSize - |tc.choices|, repr, childRepr
+            decreases tc.maxSize - |tc.choices|, Height(), 0
             modifies tc, tc.random
         {
             var d0 := tc.depth;
@@ -1651,7 +1516,7 @@ module Arbitraries {
             // TestCase. (Same style as RunTest's rng-disjointness assumption.)
             assume {:axiom} k in registry.arbs;
             var target := registry.arbs[k];
-            assume {:axiom} target.Valid() && tc.repr !! target.internalFunction.repr;
+            assume {:axiom} target.Valid();
             if !useBase {
                 tc.depth := d0 + 1;
             }
@@ -1664,24 +1529,20 @@ module Arbitraries {
 
 
         ghost predicate Valid()
-            reads internalFunction, internalFunction.repr
-            decreases internalFunction.repr, internalFunction.childRepr, 1
+            decreases internalFunction.Height(), 1
         {
-            internalFunction.repr > internalFunction.childRepr &&
             this.internalFunction.Valid()
         }
 
         method Apply(tc: TestCase) returns (result: Option<T>)
             requires tc.Valid()
             requires this.Valid()
-            requires tc.repr !! this.internalFunction.repr
             ensures this.Valid()
             ensures tc.Valid()
             ensures tc.repr == old(tc.repr)
             ensures |tc.choices| >= old(|tc.choices|)
             ensures tc.maxSize == old(tc.maxSize)
-            ensures this.internalFunction.repr == old(this.internalFunction.repr)
-            decreases tc.maxSize - |tc.choices|, this, internalFunction.repr, internalFunction.childRepr
+            decreases tc.maxSize - |tc.choices|, internalFunction.Height(), 1
             modifies tc, tc.random
         {
           result := this.internalFunction.Apply(tc);
@@ -1690,42 +1551,33 @@ module Arbitraries {
         method Map<U>(fn: T -> U) returns (p: Arbitrary<U>)
             requires Valid()
             ensures p.Valid()
-            ensures p.internalFunction.repr == {p.internalFunction}+this.internalFunction.repr
-            ensures fresh(p.internalFunction)
-            ensures fresh(this.internalFunction.repr) ==> fresh(p.internalFunction.repr)
         {
-          var mapTransformable := new MapTransformable(this, fn);
-          p := Arbitrary(mapTransformable);
+          p := Arbitrary(MapT(this, fn, this.internalFunction.Height() + 1));
+          assert p.internalFunction is MapTransformable<U, T>;
         }
-        // 
+        //
 
         static method Of<T>(args: seq<T>) returns (p: Arbitrary<T>)
             ensures p.Valid()
-            ensures fresh(p.internalFunction)
-            ensures fresh(p.internalFunction.repr)
             requires 0 < |args| <= MaxChoice
         {
-            var ofTransformable := new OfTransformable<T>(args);
-            p := Arbitrary(ofTransformable);
+            p := Arbitrary(OfT(args));
+            assert p.internalFunction is OfTransformable<T>;
         }
 
         static method Just<T>(value: T) returns (p: Arbitrary<T>)
             ensures p.Valid()
-            ensures fresh(p.internalFunction)
-            ensures fresh(p.internalFunction.repr)
         {
-            var justTransformable := new JustTransformable<T>(value);
-            p := Arbitrary(justTransformable);
+            p := Arbitrary(JustT(value));
+            assert p.internalFunction is JustTransformable<T>;
         }
 
         static method Range(min: int, max: int) returns (p: Arbitrary<int>)
             ensures p.Valid()
-            ensures fresh(p.internalFunction)
-            ensures fresh(p.internalFunction.repr)
             requires min <= max && (0 < max- min < MaxChoice)
         {
-            var rangeTransformable := new RangeTransformable(min, max);
-            p := Arbitrary(rangeTransformable);
+            p := Arbitrary(RangeT(min, max));
+            assert p.internalFunction is RangeTransformable;
         }
 
         // static method Nothing<T>() returns (p: Arbitrary<T>)
@@ -1738,83 +1590,78 @@ module Arbitraries {
         static method Mix<T>(possibilities: seq<Arbitrary<T>>) returns (p: Arbitrary<T>)
             requires 0 < |possibilities| < MaxChoice
             requires forall i :: 0 <= i < |possibilities| ==> possibilities[i].Valid()
-            requires forall x,y :: x in possibilities && y in possibilities && x != y ==> x.internalFunction.repr !! y.internalFunction.repr
             ensures p.Valid()
-            ensures fresh(p.internalFunction)
-            ensures forall x :: x in possibilities && fresh(x.internalFunction.repr) ==> fresh(p.internalFunction.repr)
         {
-            var mixTransformable := new MixTransformable<T>(possibilities);
-            p := Arbitrary(mixTransformable);
+            ghost var hh := MaxArbHeight(possibilities) + 1;
+            forall i | 0 <= i < |possibilities|
+                ensures possibilities[i].internalFunction.Height() < hh
+            {
+                MaxArbHeightUpperBound(possibilities, i);
+            }
+            p := Arbitrary(MixT(possibilities, hh));
+            assert p.internalFunction is MixTransformable<T>;
         }
 
         static method Bools() returns (p: Arbitrary<bool>)
             ensures p.Valid()
-            ensures fresh(p.internalFunction)
-            ensures fresh(p.internalFunction.repr)
         {
-            var boolsTransformable := new BoolsTransformable();
-            p := Arbitrary(boolsTransformable);
+            p := Arbitrary(BoolsT);
+            assert p.internalFunction is BoolsTransformable;
         }
 
         static method Nats(bound: nat) returns (p: Arbitrary<nat>)
             requires 0 < bound <= MaxChoice
             ensures p.Valid()
-            ensures fresh(p.internalFunction)
-            ensures fresh(p.internalFunction.repr)
         {
-            var t := new NatsTransformable(bound);
-            p := Arbitrary(t);
+            p := Arbitrary(NatsT(bound));
+            assert p.internalFunction is NatsTransformable;
         }
 
         static method Chars() returns (p: Arbitrary<char>)
             ensures p.Valid()
-            ensures fresh(p.internalFunction)
-            ensures fresh(p.internalFunction.repr)
         {
-            var t := new CharsTransformable();
-            p := Arbitrary(t);
+            p := Arbitrary(CharsT);
+            assert p.internalFunction is CharsTransformable;
         }
 
         static method Reals() returns (p: Arbitrary<real>)
             ensures p.Valid()
-            ensures fresh(p.internalFunction)
-            ensures fresh(p.internalFunction.repr)
         {
-            var t := new RealsTransformable();
-            p := Arbitrary(t);
+            p := Arbitrary(RealsT);
+            assert p.internalFunction is RealsTransformable;
         }
 
         static method BitVectors1() returns (p: Arbitrary<bv1>)
-            ensures p.Valid() ensures fresh(p.internalFunction) ensures fresh(p.internalFunction.repr)
-        { var t := new BitVectors1Transformable(); p := Arbitrary(t); }
+            ensures p.Valid()
+        { p := Arbitrary(BV1T); assert p.internalFunction is BitVectors1Transformable; }
 
         static method BitVectors2() returns (p: Arbitrary<bv2>)
-            ensures p.Valid() ensures fresh(p.internalFunction) ensures fresh(p.internalFunction.repr)
-        { var t := new BitVectors2Transformable(); p := Arbitrary(t); }
+            ensures p.Valid()
+        { p := Arbitrary(BV2T); assert p.internalFunction is BitVectors2Transformable; }
 
         static method BitVectors8() returns (p: Arbitrary<bv8>)
-            ensures p.Valid() ensures fresh(p.internalFunction) ensures fresh(p.internalFunction.repr)
-        { var t := new BitVectors8Transformable(); p := Arbitrary(t); }
+            ensures p.Valid()
+        { p := Arbitrary(BV8T); assert p.internalFunction is BitVectors8Transformable; }
 
         static method BitVectors16() returns (p: Arbitrary<bv16>)
-            ensures p.Valid() ensures fresh(p.internalFunction) ensures fresh(p.internalFunction.repr)
-        { var t := new BitVectors16Transformable(); p := Arbitrary(t); }
+            ensures p.Valid()
+        { p := Arbitrary(BV16T); assert p.internalFunction is BitVectors16Transformable; }
 
         static method BitVectors32() returns (p: Arbitrary<bv32>)
-            ensures p.Valid() ensures fresh(p.internalFunction) ensures fresh(p.internalFunction.repr)
-        { var t := new BitVectors32Transformable(); p := Arbitrary(t); }
+            ensures p.Valid()
+        { p := Arbitrary(BV32T); assert p.internalFunction is BitVectors32Transformable; }
 
         static method BitVectors64() returns (p: Arbitrary<bv64>)
-            ensures p.Valid() ensures fresh(p.internalFunction) ensures fresh(p.internalFunction.repr)
-        { var t := new BitVectors64Transformable(); p := Arbitrary(t); }
+            ensures p.Valid()
+        { p := Arbitrary(BV64T); assert p.internalFunction is BitVectors64Transformable; }
 
         static method BitVectors128() returns (p: Arbitrary<bv128>)
-            ensures p.Valid() ensures fresh(p.internalFunction) ensures fresh(p.internalFunction.repr)
-        { var t := new BitVectors128Transformable(); p := Arbitrary(t); }
+            ensures p.Valid()
+        { p := Arbitrary(BV128T); assert p.internalFunction is BitVectors128Transformable; }
 
         static method BitVectors256() returns (p: Arbitrary<bv256>)
-            ensures p.Valid() ensures fresh(p.internalFunction) ensures fresh(p.internalFunction.repr)
-        { var t := new BitVectors256Transformable(); p := Arbitrary(t); }
+            ensures p.Valid()
+        { p := Arbitrary(BV256T); assert p.internalFunction is BitVectors256Transformable; }
 
         // Collections derived from the verified Lists/Tuple/Map combinators â€”
         // generate a seq and project it to the target collection type.
@@ -1842,7 +1689,6 @@ module Arbitraries {
             returns (p: Arbitrary<map<K, V>>)
             requires 0 <= minSize <= maxSize
             requires keyGen.Valid() && valGen.Valid()
-            requires keyGen.internalFunction.repr !! valGen.internalFunction.repr
             ensures p.Valid()
         {
             var pairGen := Tuple<K, V>(keyGen, valGen);
@@ -1855,11 +1701,9 @@ module Arbitraries {
             requires 0 <= minSize <= maxSize
             requires elementGenerator.Valid()
             ensures p.Valid()
-            ensures fresh(p.internalFunction)
-            ensures fresh(elementGenerator.internalFunction) ==> fresh(p.internalFunction.repr)
         {
-            var t := new ArraysTransformable<S>(elementGenerator, minSize, maxSize);
-            p := Arbitrary(t);
+            p := Arbitrary(ArraysT(elementGenerator, minSize, maxSize, elementGenerator.internalFunction.Height() + 1));
+            assert p.internalFunction is ArraysTransformable<S>;
         }
 
         // Fixed-size 2-D array generator: every value is a rows x cols array2<S>.
@@ -1867,11 +1711,9 @@ module Arbitraries {
             returns (p: Arbitrary<array2<S>>)
             requires elementGenerator.Valid()
             ensures p.Valid()
-            ensures fresh(p.internalFunction)
-            ensures fresh(elementGenerator.internalFunction) ==> fresh(p.internalFunction.repr)
         {
-            var t := new Array2Transformable<S>(elementGenerator, rows, cols);
-            p := Arbitrary(t);
+            p := Arbitrary(Array2T(elementGenerator, rows, cols, elementGenerator.internalFunction.Height() + 1));
+            assert p.internalFunction is Array2Transformable<S>;
         }
 
         // Fixed-size 3-D array generator: every value is a rows x cols x layers array3<S>.
@@ -1879,259 +1721,107 @@ module Arbitraries {
             returns (p: Arbitrary<array3<S>>)
             requires elementGenerator.Valid()
             ensures p.Valid()
-            ensures fresh(p.internalFunction)
-            ensures fresh(elementGenerator.internalFunction) ==> fresh(p.internalFunction.repr)
         {
-            var t := new Array3Transformable<S>(elementGenerator, rows, cols, layers);
-            p := Arbitrary(t);
+            p := Arbitrary(Array3T(elementGenerator, rows, cols, layers, elementGenerator.internalFunction.Height() + 1));
+            assert p.internalFunction is Array3Transformable<S>;
         }
 
         // (Recursive/letrec generators are provided via the Registry class above,
         // not as a static factory here â€” see Registry.Tie / Register / Lookup.)
 
-        // n-tuple generators (3..10). Each is defined in terms of the previous
-        // one: TupleN(a1..aN) = Map(Tuple(a1, Tuple{N-1}(a2..aN))) flattened.
-        // Because the (N-1)-tuple is already flat, the flatten lambda is shallow.
-        // Inputs must have pairwise-disjoint representation sets (typically true
-        // for independently-built arbitraries). Each method exposes a small
-        // repr-shape postcondition (inputs' reprs are contained, everything else
-        // is fresh) so the next level can discharge Tuple's disjointness.
+        // n-tuple generators (3..10). Each constructs its dedicated TupleN
+        // datatype, whose Apply draws the N children directly and builds the flat
+        // tuple in one step — no nested pairs, no Map flatten, no intermediate
+        // allocations. h is the sum of child heights + 1, so every child is < h.
         static method Tuple3<A, B, C>(a: Arbitrary<A>, b: Arbitrary<B>, c: Arbitrary<C>)
             returns (p: Arbitrary<(A, B, C)>)
             requires a.Valid() && b.Valid() && c.Valid()
-            requires a.internalFunction.repr !! b.internalFunction.repr
-            requires a.internalFunction.repr !! c.internalFunction.repr
-            requires b.internalFunction.repr !! c.internalFunction.repr
             ensures p.Valid()
-            ensures a.internalFunction.repr + b.internalFunction.repr + c.internalFunction.repr
-                    <= p.internalFunction.repr
-            ensures fresh(p.internalFunction.repr -
-                    (a.internalFunction.repr + b.internalFunction.repr + c.internalFunction.repr))
         {
-            var rest := Tuple<B, C>(b, c);
-            var u := Tuple<A, (B, C)>(a, rest);
-            p := u.Map((x: (A, (B, C))) => (x.0, x.1.0, x.1.1));
+            ghost var hh := a.internalFunction.Height() + b.internalFunction.Height() +
+                            c.internalFunction.Height() + 1;
+            p := Arbitrary(Tuple3T(a, b, c, hh));
+            assert p.internalFunction is Tuple3Transformable<A, B, C>;
         }
 
         static method Tuple4<A, B, C, D>(a: Arbitrary<A>, b: Arbitrary<B>, c: Arbitrary<C>, d: Arbitrary<D>)
             returns (p: Arbitrary<(A, B, C, D)>)
             requires a.Valid() && b.Valid() && c.Valid() && d.Valid()
-            requires a.internalFunction.repr !! b.internalFunction.repr
-            requires a.internalFunction.repr !! c.internalFunction.repr
-            requires a.internalFunction.repr !! d.internalFunction.repr
-            requires b.internalFunction.repr !! c.internalFunction.repr
-            requires b.internalFunction.repr !! d.internalFunction.repr
-            requires c.internalFunction.repr !! d.internalFunction.repr
             ensures p.Valid()
-            ensures a.internalFunction.repr + b.internalFunction.repr + c.internalFunction.repr +
-                    d.internalFunction.repr <= p.internalFunction.repr
-            ensures fresh(p.internalFunction.repr -
-                    (a.internalFunction.repr + b.internalFunction.repr + c.internalFunction.repr +
-                     d.internalFunction.repr))
         {
-            var rest := Tuple3<B, C, D>(b, c, d);
-            var u := Tuple<A, (B, C, D)>(a, rest);
-            p := u.Map((x: (A, (B, C, D))) => (x.0, x.1.0, x.1.1, x.1.2));
+            ghost var hh := a.internalFunction.Height() + b.internalFunction.Height() +
+                            c.internalFunction.Height() + d.internalFunction.Height() + 1;
+            p := Arbitrary(Tuple4T(a, b, c, d, hh));
+            assert p.internalFunction is Tuple4Transformable<A, B, C, D>;
         }
 
         static method Tuple5<A, B, C, D, E>(a: Arbitrary<A>, b: Arbitrary<B>, c: Arbitrary<C>,
                 d: Arbitrary<D>, e: Arbitrary<E>)
             returns (p: Arbitrary<(A, B, C, D, E)>)
             requires a.Valid() && b.Valid() && c.Valid() && d.Valid() && e.Valid()
-            requires a.internalFunction.repr !! b.internalFunction.repr
-            requires a.internalFunction.repr !! c.internalFunction.repr
-            requires a.internalFunction.repr !! d.internalFunction.repr
-            requires a.internalFunction.repr !! e.internalFunction.repr
-            requires b.internalFunction.repr !! c.internalFunction.repr
-            requires b.internalFunction.repr !! d.internalFunction.repr
-            requires b.internalFunction.repr !! e.internalFunction.repr
-            requires c.internalFunction.repr !! d.internalFunction.repr
-            requires c.internalFunction.repr !! e.internalFunction.repr
-            requires d.internalFunction.repr !! e.internalFunction.repr
             ensures p.Valid()
-            ensures a.internalFunction.repr + b.internalFunction.repr + c.internalFunction.repr +
-                    d.internalFunction.repr + e.internalFunction.repr <= p.internalFunction.repr
-            ensures fresh(p.internalFunction.repr -
-                    (a.internalFunction.repr + b.internalFunction.repr + c.internalFunction.repr +
-                     d.internalFunction.repr + e.internalFunction.repr))
         {
-            var rest := Tuple4<B, C, D, E>(b, c, d, e);
-            var u := Tuple<A, (B, C, D, E)>(a, rest);
-            p := u.Map((x: (A, (B, C, D, E))) => (x.0, x.1.0, x.1.1, x.1.2, x.1.3));
+            ghost var hh := a.internalFunction.Height() + b.internalFunction.Height() +
+                            c.internalFunction.Height() + d.internalFunction.Height() +
+                            e.internalFunction.Height() + 1;
+            p := Arbitrary(Tuple5T(a, b, c, d, e, hh));
+            assert p.internalFunction is Tuple5Transformable<A, B, C, D, E>;
         }
 
         static method Tuple6<A, B, C, D, E, F>(a: Arbitrary<A>, b: Arbitrary<B>, c: Arbitrary<C>,
                 d: Arbitrary<D>, e: Arbitrary<E>, f: Arbitrary<F>)
             returns (p: Arbitrary<(A, B, C, D, E, F)>)
             requires a.Valid() && b.Valid() && c.Valid() && d.Valid() && e.Valid() && f.Valid()
-            requires a.internalFunction.repr !! b.internalFunction.repr
-            requires a.internalFunction.repr !! c.internalFunction.repr
-            requires a.internalFunction.repr !! d.internalFunction.repr
-            requires a.internalFunction.repr !! e.internalFunction.repr
-            requires a.internalFunction.repr !! f.internalFunction.repr
-            requires b.internalFunction.repr !! c.internalFunction.repr
-            requires b.internalFunction.repr !! d.internalFunction.repr
-            requires b.internalFunction.repr !! e.internalFunction.repr
-            requires b.internalFunction.repr !! f.internalFunction.repr
-            requires c.internalFunction.repr !! d.internalFunction.repr
-            requires c.internalFunction.repr !! e.internalFunction.repr
-            requires c.internalFunction.repr !! f.internalFunction.repr
-            requires d.internalFunction.repr !! e.internalFunction.repr
-            requires d.internalFunction.repr !! f.internalFunction.repr
-            requires e.internalFunction.repr !! f.internalFunction.repr
             ensures p.Valid()
-            ensures a.internalFunction.repr + b.internalFunction.repr + c.internalFunction.repr +
-                    d.internalFunction.repr + e.internalFunction.repr + f.internalFunction.repr
-                    <= p.internalFunction.repr
-            ensures fresh(p.internalFunction.repr -
-                    (a.internalFunction.repr + b.internalFunction.repr + c.internalFunction.repr +
-                     d.internalFunction.repr + e.internalFunction.repr + f.internalFunction.repr))
         {
-            var rest := Tuple5<B, C, D, E, F>(b, c, d, e, f);
-            var u := Tuple<A, (B, C, D, E, F)>(a, rest);
-            p := u.Map((x: (A, (B, C, D, E, F))) => (x.0, x.1.0, x.1.1, x.1.2, x.1.3, x.1.4));
+            ghost var hh := a.internalFunction.Height() + b.internalFunction.Height() +
+                            c.internalFunction.Height() + d.internalFunction.Height() +
+                            e.internalFunction.Height() + f.internalFunction.Height() + 1;
+            p := Arbitrary(Tuple6T(a, b, c, d, e, f, hh));
+            assert p.internalFunction is Tuple6Transformable<A, B, C, D, E, F>;
         }
 
         static method Tuple7<A, B, C, D, E, F, G>(a: Arbitrary<A>, b: Arbitrary<B>, c: Arbitrary<C>,
                 d: Arbitrary<D>, e: Arbitrary<E>, f: Arbitrary<F>, g: Arbitrary<G>)
             returns (p: Arbitrary<(A, B, C, D, E, F, G)>)
             requires a.Valid() && b.Valid() && c.Valid() && d.Valid() && e.Valid() && f.Valid() && g.Valid()
-            requires a.internalFunction.repr !! b.internalFunction.repr
-            requires a.internalFunction.repr !! c.internalFunction.repr
-            requires a.internalFunction.repr !! d.internalFunction.repr
-            requires a.internalFunction.repr !! e.internalFunction.repr
-            requires a.internalFunction.repr !! f.internalFunction.repr
-            requires a.internalFunction.repr !! g.internalFunction.repr
-            requires b.internalFunction.repr !! c.internalFunction.repr
-            requires b.internalFunction.repr !! d.internalFunction.repr
-            requires b.internalFunction.repr !! e.internalFunction.repr
-            requires b.internalFunction.repr !! f.internalFunction.repr
-            requires b.internalFunction.repr !! g.internalFunction.repr
-            requires c.internalFunction.repr !! d.internalFunction.repr
-            requires c.internalFunction.repr !! e.internalFunction.repr
-            requires c.internalFunction.repr !! f.internalFunction.repr
-            requires c.internalFunction.repr !! g.internalFunction.repr
-            requires d.internalFunction.repr !! e.internalFunction.repr
-            requires d.internalFunction.repr !! f.internalFunction.repr
-            requires d.internalFunction.repr !! g.internalFunction.repr
-            requires e.internalFunction.repr !! f.internalFunction.repr
-            requires e.internalFunction.repr !! g.internalFunction.repr
-            requires f.internalFunction.repr !! g.internalFunction.repr
             ensures p.Valid()
-            ensures a.internalFunction.repr + b.internalFunction.repr + c.internalFunction.repr +
-                    d.internalFunction.repr + e.internalFunction.repr + f.internalFunction.repr +
-                    g.internalFunction.repr <= p.internalFunction.repr
-            ensures fresh(p.internalFunction.repr -
-                    (a.internalFunction.repr + b.internalFunction.repr + c.internalFunction.repr +
-                     d.internalFunction.repr + e.internalFunction.repr + f.internalFunction.repr +
-                     g.internalFunction.repr))
         {
-            var rest := Tuple6<B, C, D, E, F, G>(b, c, d, e, f, g);
-            var u := Tuple<A, (B, C, D, E, F, G)>(a, rest);
-            p := u.Map((x: (A, (B, C, D, E, F, G))) => (x.0, x.1.0, x.1.1, x.1.2, x.1.3, x.1.4, x.1.5));
+            ghost var hh := a.internalFunction.Height() + b.internalFunction.Height() +
+                            c.internalFunction.Height() + d.internalFunction.Height() +
+                            e.internalFunction.Height() + f.internalFunction.Height() +
+                            g.internalFunction.Height() + 1;
+            p := Arbitrary(Tuple7T(a, b, c, d, e, f, g, hh));
+            assert p.internalFunction is Tuple7Transformable<A, B, C, D, E, F, G>;
         }
 
         static method Tuple8<A, B, C, D, E, F, G, H>(a: Arbitrary<A>, b: Arbitrary<B>, c: Arbitrary<C>,
                 d: Arbitrary<D>, e: Arbitrary<E>, f: Arbitrary<F>, g: Arbitrary<G>, h: Arbitrary<H>)
             returns (p: Arbitrary<(A, B, C, D, E, F, G, H)>)
             requires a.Valid() && b.Valid() && c.Valid() && d.Valid() && e.Valid() && f.Valid() && g.Valid() && h.Valid()
-            requires a.internalFunction.repr !! b.internalFunction.repr
-            requires a.internalFunction.repr !! c.internalFunction.repr
-            requires a.internalFunction.repr !! d.internalFunction.repr
-            requires a.internalFunction.repr !! e.internalFunction.repr
-            requires a.internalFunction.repr !! f.internalFunction.repr
-            requires a.internalFunction.repr !! g.internalFunction.repr
-            requires a.internalFunction.repr !! h.internalFunction.repr
-            requires b.internalFunction.repr !! c.internalFunction.repr
-            requires b.internalFunction.repr !! d.internalFunction.repr
-            requires b.internalFunction.repr !! e.internalFunction.repr
-            requires b.internalFunction.repr !! f.internalFunction.repr
-            requires b.internalFunction.repr !! g.internalFunction.repr
-            requires b.internalFunction.repr !! h.internalFunction.repr
-            requires c.internalFunction.repr !! d.internalFunction.repr
-            requires c.internalFunction.repr !! e.internalFunction.repr
-            requires c.internalFunction.repr !! f.internalFunction.repr
-            requires c.internalFunction.repr !! g.internalFunction.repr
-            requires c.internalFunction.repr !! h.internalFunction.repr
-            requires d.internalFunction.repr !! e.internalFunction.repr
-            requires d.internalFunction.repr !! f.internalFunction.repr
-            requires d.internalFunction.repr !! g.internalFunction.repr
-            requires d.internalFunction.repr !! h.internalFunction.repr
-            requires e.internalFunction.repr !! f.internalFunction.repr
-            requires e.internalFunction.repr !! g.internalFunction.repr
-            requires e.internalFunction.repr !! h.internalFunction.repr
-            requires f.internalFunction.repr !! g.internalFunction.repr
-            requires f.internalFunction.repr !! h.internalFunction.repr
-            requires g.internalFunction.repr !! h.internalFunction.repr
             ensures p.Valid()
-            ensures a.internalFunction.repr + b.internalFunction.repr + c.internalFunction.repr +
-                    d.internalFunction.repr + e.internalFunction.repr + f.internalFunction.repr +
-                    g.internalFunction.repr + h.internalFunction.repr <= p.internalFunction.repr
-            ensures fresh(p.internalFunction.repr -
-                    (a.internalFunction.repr + b.internalFunction.repr + c.internalFunction.repr +
-                     d.internalFunction.repr + e.internalFunction.repr + f.internalFunction.repr +
-                     g.internalFunction.repr + h.internalFunction.repr))
         {
-            var rest := Tuple7<B, C, D, E, F, G, H>(b, c, d, e, f, g, h);
-            var u := Tuple<A, (B, C, D, E, F, G, H)>(a, rest);
-            p := u.Map((x: (A, (B, C, D, E, F, G, H))) =>
-                (x.0, x.1.0, x.1.1, x.1.2, x.1.3, x.1.4, x.1.5, x.1.6));
+            ghost var hh := a.internalFunction.Height() + b.internalFunction.Height() +
+                            c.internalFunction.Height() + d.internalFunction.Height() +
+                            e.internalFunction.Height() + f.internalFunction.Height() +
+                            g.internalFunction.Height() + h.internalFunction.Height() + 1;
+            p := Arbitrary(Tuple8T(a, b, c, d, e, f, g, h, hh));
+            assert p.internalFunction is Tuple8Transformable<A, B, C, D, E, F, G, H>;
         }
 
         static method Tuple9<A, B, C, D, E, F, G, H, I>(a: Arbitrary<A>, b: Arbitrary<B>, c: Arbitrary<C>,
                 d: Arbitrary<D>, e: Arbitrary<E>, f: Arbitrary<F>, g: Arbitrary<G>, h: Arbitrary<H>, i: Arbitrary<I>)
             returns (p: Arbitrary<(A, B, C, D, E, F, G, H, I)>)
             requires a.Valid() && b.Valid() && c.Valid() && d.Valid() && e.Valid() && f.Valid() && g.Valid() && h.Valid() && i.Valid()
-            requires a.internalFunction.repr !! b.internalFunction.repr
-            requires a.internalFunction.repr !! c.internalFunction.repr
-            requires a.internalFunction.repr !! d.internalFunction.repr
-            requires a.internalFunction.repr !! e.internalFunction.repr
-            requires a.internalFunction.repr !! f.internalFunction.repr
-            requires a.internalFunction.repr !! g.internalFunction.repr
-            requires a.internalFunction.repr !! h.internalFunction.repr
-            requires a.internalFunction.repr !! i.internalFunction.repr
-            requires b.internalFunction.repr !! c.internalFunction.repr
-            requires b.internalFunction.repr !! d.internalFunction.repr
-            requires b.internalFunction.repr !! e.internalFunction.repr
-            requires b.internalFunction.repr !! f.internalFunction.repr
-            requires b.internalFunction.repr !! g.internalFunction.repr
-            requires b.internalFunction.repr !! h.internalFunction.repr
-            requires b.internalFunction.repr !! i.internalFunction.repr
-            requires c.internalFunction.repr !! d.internalFunction.repr
-            requires c.internalFunction.repr !! e.internalFunction.repr
-            requires c.internalFunction.repr !! f.internalFunction.repr
-            requires c.internalFunction.repr !! g.internalFunction.repr
-            requires c.internalFunction.repr !! h.internalFunction.repr
-            requires c.internalFunction.repr !! i.internalFunction.repr
-            requires d.internalFunction.repr !! e.internalFunction.repr
-            requires d.internalFunction.repr !! f.internalFunction.repr
-            requires d.internalFunction.repr !! g.internalFunction.repr
-            requires d.internalFunction.repr !! h.internalFunction.repr
-            requires d.internalFunction.repr !! i.internalFunction.repr
-            requires e.internalFunction.repr !! f.internalFunction.repr
-            requires e.internalFunction.repr !! g.internalFunction.repr
-            requires e.internalFunction.repr !! h.internalFunction.repr
-            requires e.internalFunction.repr !! i.internalFunction.repr
-            requires f.internalFunction.repr !! g.internalFunction.repr
-            requires f.internalFunction.repr !! h.internalFunction.repr
-            requires f.internalFunction.repr !! i.internalFunction.repr
-            requires g.internalFunction.repr !! h.internalFunction.repr
-            requires g.internalFunction.repr !! i.internalFunction.repr
-            requires h.internalFunction.repr !! i.internalFunction.repr
             ensures p.Valid()
-            ensures a.internalFunction.repr + b.internalFunction.repr + c.internalFunction.repr +
-                    d.internalFunction.repr + e.internalFunction.repr + f.internalFunction.repr +
-                    g.internalFunction.repr + h.internalFunction.repr + i.internalFunction.repr
-                    <= p.internalFunction.repr
-            ensures fresh(p.internalFunction.repr -
-                    (a.internalFunction.repr + b.internalFunction.repr + c.internalFunction.repr +
-                     d.internalFunction.repr + e.internalFunction.repr + f.internalFunction.repr +
-                     g.internalFunction.repr + h.internalFunction.repr + i.internalFunction.repr))
         {
-            var rest := Tuple8<B, C, D, E, F, G, H, I>(b, c, d, e, f, g, h, i);
-            var u := Tuple<A, (B, C, D, E, F, G, H, I)>(a, rest);
-            p := u.Map((x: (A, (B, C, D, E, F, G, H, I))) =>
-                (x.0, x.1.0, x.1.1, x.1.2, x.1.3, x.1.4, x.1.5, x.1.6, x.1.7));
+            ghost var hh := a.internalFunction.Height() + b.internalFunction.Height() +
+                            c.internalFunction.Height() + d.internalFunction.Height() +
+                            e.internalFunction.Height() + f.internalFunction.Height() +
+                            g.internalFunction.Height() + h.internalFunction.Height() +
+                            i.internalFunction.Height() + 1;
+            p := Arbitrary(Tuple9T(a, b, c, d, e, f, g, h, i, hh));
+            assert p.internalFunction is Tuple9Transformable<A, B, C, D, E, F, G, H, I>;
         }
 
         static method Tuple10<A, B, C, D, E, F, G, H, I, J>(a: Arbitrary<A>, b: Arbitrary<B>, c: Arbitrary<C>,
@@ -2139,115 +1829,52 @@ module Arbitraries {
                 i: Arbitrary<I>, j: Arbitrary<J>)
             returns (p: Arbitrary<(A, B, C, D, E, F, G, H, I, J)>)
             requires a.Valid() && b.Valid() && c.Valid() && d.Valid() && e.Valid() && f.Valid() && g.Valid() && h.Valid() && i.Valid() && j.Valid()
-            requires a.internalFunction.repr !! b.internalFunction.repr
-            requires a.internalFunction.repr !! c.internalFunction.repr
-            requires a.internalFunction.repr !! d.internalFunction.repr
-            requires a.internalFunction.repr !! e.internalFunction.repr
-            requires a.internalFunction.repr !! f.internalFunction.repr
-            requires a.internalFunction.repr !! g.internalFunction.repr
-            requires a.internalFunction.repr !! h.internalFunction.repr
-            requires a.internalFunction.repr !! i.internalFunction.repr
-            requires a.internalFunction.repr !! j.internalFunction.repr
-            requires b.internalFunction.repr !! c.internalFunction.repr
-            requires b.internalFunction.repr !! d.internalFunction.repr
-            requires b.internalFunction.repr !! e.internalFunction.repr
-            requires b.internalFunction.repr !! f.internalFunction.repr
-            requires b.internalFunction.repr !! g.internalFunction.repr
-            requires b.internalFunction.repr !! h.internalFunction.repr
-            requires b.internalFunction.repr !! i.internalFunction.repr
-            requires b.internalFunction.repr !! j.internalFunction.repr
-            requires c.internalFunction.repr !! d.internalFunction.repr
-            requires c.internalFunction.repr !! e.internalFunction.repr
-            requires c.internalFunction.repr !! f.internalFunction.repr
-            requires c.internalFunction.repr !! g.internalFunction.repr
-            requires c.internalFunction.repr !! h.internalFunction.repr
-            requires c.internalFunction.repr !! i.internalFunction.repr
-            requires c.internalFunction.repr !! j.internalFunction.repr
-            requires d.internalFunction.repr !! e.internalFunction.repr
-            requires d.internalFunction.repr !! f.internalFunction.repr
-            requires d.internalFunction.repr !! g.internalFunction.repr
-            requires d.internalFunction.repr !! h.internalFunction.repr
-            requires d.internalFunction.repr !! i.internalFunction.repr
-            requires d.internalFunction.repr !! j.internalFunction.repr
-            requires e.internalFunction.repr !! f.internalFunction.repr
-            requires e.internalFunction.repr !! g.internalFunction.repr
-            requires e.internalFunction.repr !! h.internalFunction.repr
-            requires e.internalFunction.repr !! i.internalFunction.repr
-            requires e.internalFunction.repr !! j.internalFunction.repr
-            requires f.internalFunction.repr !! g.internalFunction.repr
-            requires f.internalFunction.repr !! h.internalFunction.repr
-            requires f.internalFunction.repr !! i.internalFunction.repr
-            requires f.internalFunction.repr !! j.internalFunction.repr
-            requires g.internalFunction.repr !! h.internalFunction.repr
-            requires g.internalFunction.repr !! i.internalFunction.repr
-            requires g.internalFunction.repr !! j.internalFunction.repr
-            requires h.internalFunction.repr !! i.internalFunction.repr
-            requires h.internalFunction.repr !! j.internalFunction.repr
-            requires i.internalFunction.repr !! j.internalFunction.repr
             ensures p.Valid()
-            ensures a.internalFunction.repr + b.internalFunction.repr + c.internalFunction.repr +
-                    d.internalFunction.repr + e.internalFunction.repr + f.internalFunction.repr +
-                    g.internalFunction.repr + h.internalFunction.repr + i.internalFunction.repr +
-                    j.internalFunction.repr <= p.internalFunction.repr
-            ensures fresh(p.internalFunction.repr -
-                    (a.internalFunction.repr + b.internalFunction.repr + c.internalFunction.repr +
-                     d.internalFunction.repr + e.internalFunction.repr + f.internalFunction.repr +
-                     g.internalFunction.repr + h.internalFunction.repr + i.internalFunction.repr +
-                     j.internalFunction.repr))
         {
-            var rest := Tuple9<B, C, D, E, F, G, H, I, J>(b, c, d, e, f, g, h, i, j);
-            var u := Tuple<A, (B, C, D, E, F, G, H, I, J)>(a, rest);
-            p := u.Map((x: (A, (B, C, D, E, F, G, H, I, J))) =>
-                (x.0, x.1.0, x.1.1, x.1.2, x.1.3, x.1.4, x.1.5, x.1.6, x.1.7, x.1.8));
+            ghost var hh := a.internalFunction.Height() + b.internalFunction.Height() +
+                            c.internalFunction.Height() + d.internalFunction.Height() +
+                            e.internalFunction.Height() + f.internalFunction.Height() +
+                            g.internalFunction.Height() + h.internalFunction.Height() +
+                            i.internalFunction.Height() + j.internalFunction.Height() + 1;
+            p := Arbitrary(Tuple10T(a, b, c, d, e, f, g, h, i, j, hh));
+            assert p.internalFunction is Tuple10Transformable<A, B, C, D, E, F, G, H, I, J>;
         }
 
         static method Lists<S>(elementGenerator: Arbitrary<S>, minSize: int, maxSize: int) returns (p: Arbitrary<seq<S>>)
             requires 0 <= minSize <= maxSize
             requires elementGenerator.Valid()
             ensures p.Valid()
-            ensures p.internalFunction.repr == {p.internalFunction}+elementGenerator.internalFunction.repr
-            ensures fresh(p.internalFunction)
-            // ensures fresh(p.internalFunction.repr)
-            ensures fresh(elementGenerator.internalFunction) ==>  fresh(p.internalFunction.repr)
         {
-            var listsTransformable := new ListsTransformable<S>(elementGenerator, minSize, maxSize);
-            p := Arbitrary(listsTransformable);
+            p := Arbitrary(ListsT(elementGenerator, minSize, maxSize, elementGenerator.internalFunction.Height() + 1));
+            assert p.internalFunction is ListsTransformable<S>;
         }
 
         static method Strings(minLength: int, maxLength: int, ascii: bool) returns (p: Arbitrary<string>)
             requires 0 <= minLength <= maxLength
             ensures p.Valid()
-            ensures fresh(p.internalFunction)
-            ensures fresh(p.internalFunction.repr)
         {
-            var stringsTransformable := new StringsTransformable(minLength, maxLength, ascii);
-            p := Arbitrary(stringsTransformable);
+            p := Arbitrary(StringsT(minLength, maxLength, ascii));
+            assert p.internalFunction is StringsTransformable;
         }
 
         static method Tuple<T, U>(firstGenerator: Arbitrary<T>, secondGenerator: Arbitrary<U>) returns (p: Arbitrary<(T, U)>)
             requires firstGenerator.Valid()
             requires secondGenerator.Valid()
-            requires firstGenerator.internalFunction.repr !! secondGenerator.internalFunction.repr
             ensures p.Valid()
-            ensures p.internalFunction.repr == {p.internalFunction} + firstGenerator.internalFunction.repr + secondGenerator.internalFunction.repr
-            ensures fresh(p.internalFunction)
-            ensures fresh(firstGenerator.internalFunction) && fresh(secondGenerator.internalFunction) ==> fresh(p.internalFunction.repr)
         {
-            var tupleTransformable := new TupleTransformable<T, U>(firstGenerator, secondGenerator);
-            p := Arbitrary(tupleTransformable);
+            ghost var fh := firstGenerator.internalFunction.Height();
+            ghost var sh := secondGenerator.internalFunction.Height();
+            p := Arbitrary(TupleT(firstGenerator, secondGenerator, (if fh > sh then fh else sh) + 1));
+            assert p.internalFunction is TupleTransformable<T, U>;
         }
 
         method FlatMap<U>(f: FlatMapFn<T, U>) returns (p: Arbitrary<U>)
             requires Valid()
-            requires f !in this.internalFunction.repr
             ensures p.Valid()
-            ensures p.internalFunction.repr == {p.internalFunction}+this.internalFunction.repr+{f}
-            ensures fresh(p.internalFunction)
-            ensures fresh(this.internalFunction.repr) ==> fresh(p.internalFunction.repr)
         {
             // We need a new Transformable that knows how to do the FlatMap logic.
-            var flatMapTransformable := new FlatMapTransformable(this, f);
-            p := Arbitrary(flatMapTransformable);
+            p := Arbitrary(FlatMapT(this, f, this.internalFunction.Height() + 1));
+            assert p.internalFunction is FlatMapTransformable<T, U>;
         }
 
     }

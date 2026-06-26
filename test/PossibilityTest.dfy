@@ -13,9 +13,6 @@ module PossibilityTest {
         var boolArb := Arbitrary<bool>.Bools();
         assert fresh(rng);
         assert fresh(tc);
-        assert fresh(boolArb.internalFunction);
-        assert (boolArb.internalFunction.Valid());
-        assert tc.repr !! boolArb.internalFunction.repr;
 
         var res1_o := boolArb.Apply(tc); expect res1_o.Some?; var res1 := res1_o.value;
         var res2_o := boolArb.Apply(tc); expect res2_o.Some?; var res2 := res2_o.value;
@@ -349,7 +346,6 @@ module PossibilityTest {
         var intArb2 := Arbitrary<int>.Range(10, 16); // Range 10-15 inclusive
         var intArb3 := Arbitrary<int>.Range(20, 26); // Range 20-25 inclusive
         var mixes := [intArb1, intArb2, intArb3];
-        assume {:axiom} forall x,y :: x in mixes && y in mixes ==> x.internalFunction.repr !! y.internalFunction.repr;
         var mixArb := Arbitrary<int>.Mix(mixes);
 
         var res1_o := mixArb.Apply(tc); expect res1_o.Some?; var res1 := res1_o.value;
@@ -373,7 +369,6 @@ module PossibilityTest {
         var stringArb3 := Arbitrary<string>.Just("Test");
         var stringArb4 := Arbitrary<string>.Strings(3, 8, true); // Random ASCII strings
         var mixes := [stringArb1, stringArb2, stringArb3, stringArb4];
-        assume {:axiom} forall x,y :: x in mixes && y in mixes ==> x.internalFunction.repr !! y.internalFunction.repr;
         var mixArb := Arbitrary<string>.Mix(mixes);
 
         var res1_o := mixArb.Apply(tc); expect res1_o.Some?; var res1 := res1_o.value;
@@ -395,11 +390,7 @@ module PossibilityTest {
         var boolArb1 := Arbitrary<bool>.Just(true);
         var boolArb2 := Arbitrary<bool>.Just(false);
         var boolArb3 := Arbitrary<bool>.Bools(); // Random booleans
-        assert fresh(boolArb1.internalFunction.repr);
-        assert fresh(boolArb2.internalFunction.repr);
-        assert fresh(boolArb3.internalFunction.repr);
         var mixes := [boolArb1, boolArb2, boolArb3];
-        assume {:axiom} forall x,y :: x in mixes && y in mixes ==> x.internalFunction.repr !! y.internalFunction.repr;
         var mixArb := Arbitrary<bool>.Mix(mixes);
         // assert fresh(mixArb.internalFunction.repr);
 
@@ -423,7 +414,6 @@ module PossibilityTest {
         var ofArb2 := Arbitrary<int>.Of([10, 20, 30]);
         var rangeArb := Arbitrary<int>.Range(100, 106); // Range 100-105 inclusive
         var mixes := [ofArb1, ofArb2, rangeArb];
-        assume {:axiom} forall x,y :: x in mixes && y in mixes ==> x.internalFunction.repr !! y.internalFunction.repr;
         var mixArb := Arbitrary<int>.Mix(mixes);
 
         var res1_o := mixArb.Apply(tc); expect res1_o.Some?; var res1 := res1_o.value;
@@ -447,7 +437,6 @@ module PossibilityTest {
         var listsArb1 := Arbitrary<seq<int>>.Lists(elementArb1, 1, 3);
         var listsArb2 := Arbitrary<seq<int>>.Lists(elementArb2, 2, 4);
         var mixes := [listsArb1, listsArb2];
-        assume {:axiom} forall x,y :: x in mixes && y in mixes ==> x.internalFunction.repr !! y.internalFunction.repr;
         var mixArb := Arbitrary<seq<int>>.Mix(mixes);
 
         var res1_o := mixArb.Apply(tc); expect res1_o.Some?; var res1 := res1_o.value;
@@ -469,7 +458,6 @@ module PossibilityTest {
         var intArb1 := Arbitrary<int>.Range(1, 4); // Range 1-3 inclusive
         var intArb2 := Arbitrary<int>.Range(10, 14); // Range 10-13 inclusive
         var mixes := [intArb1, intArb2];
-        assume {:axiom} forall x,y :: x in mixes && y in mixes ==> x.internalFunction.repr !! y.internalFunction.repr;
         var mixArb := Arbitrary<int>.Mix(mixes);
         var mappedArb := mixArb.Map<string>((x) => "Mixed: " + OfInt(x));
 
@@ -495,7 +483,6 @@ module PossibilityTest {
         var justTrueArb := Arbitrary<bool>.Just(true);
         var tupleArb2 := Arbitrary<(int, bool)>.Tuple(intArb, justTrueArb);
         var mixes := [tupleArb1, tupleArb2];
-        assume {:axiom} forall x,y :: x in mixes && y in mixes ==> x.internalFunction.repr !! y.internalFunction.repr;
         var mixArb := Arbitrary<(int, bool)>.Mix(mixes);
 
         var res1_o := mixArb.Apply(tc); expect res1_o.Some?; var res1 := res1_o.value;
@@ -521,7 +508,6 @@ module PossibilityTest {
         var range2Arb := Arbitrary<int>.Range(20, 25);
         var ofArb := Arbitrary<int>.Of([100, 200, 300]);
         var mixes := [just1Arb, just2Arb, just3Arb, range1Arb, range2Arb, ofArb];
-        assume {:axiom} forall x,y :: x in mixes && y in mixes ==> x.internalFunction.repr !! y.internalFunction.repr;
         var mixArb := Arbitrary<int>.Mix(mixes);
 
         var res1_o := mixArb.Apply(tc); expect res1_o.Some?; var res1 := res1_o.value;
@@ -545,7 +531,6 @@ module PossibilityTest {
 
         method CreateArbitrary(t: int) returns (p: Arbitrary<(int, seq<int>)>)
             ensures p.Valid()
-            ensures fresh(p.internalFunction.repr)
        {
             expect {:axiom } 0 < t < MaxChoice;
             var range := Arbitrary<int>.Range(0, t);
@@ -562,7 +547,6 @@ module PossibilityTest {
         // (the faithful finite-buffer behavior, previously hidden by silent defaulting).
         var tc := new TestCase([], rng, 1000, true);
         var range1Arb := Arbitrary<int>.Range(1, 25);
-        assert fresh(range1Arb.internalFunction.repr);
         var pfm := new PruferFlatMap();
         var pruferSequenceArb := range1Arb.FlatMap(pfm);
         var res1_o := pruferSequenceArb.Apply(tc); expect res1_o.Some?; var res1 := res1_o.value;

@@ -1,2 +1,7 @@
 [options]
 standard-libraries = true
+general-traits = "datatype"
+type-system-refresh = true
+# One case-study lemma (BitonicSort.MergeClampCommute) needs ~40s under the
+# refreshed type system; raise the per-assertion limit above the 31s default.
+verification-time-limit = 180
