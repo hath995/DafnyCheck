@@ -159,7 +159,7 @@ module Arbitraries {
       ensures old(this.Valid()) ==> this.Valid()
       ensures old(repr) == repr
       modifies this`choices, random
-      // ensures result.value.Some? ==> result.value.Extract() < n
+      ensures result.value.Some? ==> result.value.Extract() < n
     {
       result := MakeChoice_(n, (rand) => rand % n);
     }
@@ -173,6 +173,7 @@ module Arbitraries {
       ensures old(this.Valid()) ==> this.Valid()
       ensures old(repr) == repr
       modifies this`choices, random
+      ensures result.value.Some? ==> result.value.Extract() < n
       // ensures result.value.Some? ==> exists x: Choice :: randomFunc(x) == result.value.Extract();
     {
       if (|choices| >= maxSize) {
@@ -709,7 +710,8 @@ module Arbitraries {
                 var choiceResult := tc.MakeChoice(charChoice as Choice);
                 if choiceResult.value.None? { return None; }  // char draw overran: abort
                 var charValue := choiceResult.Unwrap();
-                assume {:axiom} 0 <= charValue < 0x0000D800;
+                assert charValue < charChoice as Choice;
+                assert 0 <= charValue < 0x0000D800;
                 chars := chars + [charValue as nat];
             }
             var s: string := "";
@@ -1217,7 +1219,7 @@ module Arbitraries {
             var c := tc.MakeChoice(95);
             if c.value.None? { return None; }
             var v := c.Unwrap() as int;
-            assume {:axiom} 0 <= v < 95;
+            assert 0 <= v < 95;
             result := Some((32 + v) as char);
         }
     }
@@ -1289,7 +1291,7 @@ module Arbitraries {
         {
             var c := tc.MakeChoice(2);
             var v := if c.value.Some? then c.Unwrap() else 0;
-            assume {:axiom} v < 2;
+            assert v < 2;
             result := Some(v as bv1);
         }
     }
@@ -1314,7 +1316,7 @@ module Arbitraries {
         {
             var c := tc.MakeChoice(4);
             var v := if c.value.Some? then c.Unwrap() else 0;
-            assume {:axiom} v < 4;
+            assert v < 4;
             result := Some(v as bv2);
         }
     }
@@ -1339,7 +1341,7 @@ module Arbitraries {
         {
             var c := tc.MakeChoice(256);
             var v := if c.value.Some? then c.Unwrap() else 0;
-            assume {:axiom} v < 256;
+            assert v < 256;
             result := Some(v as bv8);
         }
     }
@@ -1364,7 +1366,7 @@ module Arbitraries {
         {
             var c := tc.MakeChoice(0x10000);
             var v := if c.value.Some? then c.Unwrap() else 0;
-            assume {:axiom} v < 0x10000;
+            assert v < 0x10000;
             result := Some(v as bv16);
         }
     }

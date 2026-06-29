@@ -197,6 +197,10 @@ module DafnyCheck {
     constructor(seed: bv64)
       ensures fresh(this)
       ensures fresh(this.random)
+      // The inner RNG is allocated after `this`, so the wrapper and its inner
+      // generator are distinct objects (Dafny needs this stated since their
+      // types — RandomGen vs XoroShift128Plus — don't rule out aliasing).
+      ensures (this as object) != (this.random as object)
     {
       var foo := XoroShift128Plus.fromSeed(seed);
       this.random := foo;
@@ -246,6 +250,10 @@ module DafnyCheck {
       requires testFunction.Valid()
       requires random !in testFunction.repr
       requires random.random !in testFunction.repr
+      // The RNG wrapper and its inner generator are distinct objects (see
+      // SimpleRandomGen's constructor); needed to keep them out of a test
+      // case's repr later. `this != random.random` follows from freshness here.
+      requires (random as object) != (random.random as object)
       ensures fresh(this)
       ensures this.testFunction == testFunction
       ensures this.random == random
@@ -277,6 +285,13 @@ module DafnyCheck {
       this !in testFunction.repr &&
       random !in testFunction.repr &&
       random.random !in testFunction.repr &&
+      // The TestingState, its RNG wrapper, and the inner generator are three
+      // distinct objects. Dafny can't derive this from the (incompatible) types,
+      // so we carry it: it lets Generate prove the RNG lives outside a freshly
+      // built test case's repr, which in turn frames `this.random.random` across
+      // testFunction.Apply.
+      (this as object) != (random.random as object) &&
+      (random as object) != (random.random as object) &&
       this.repr == {this, random, random.random} + testFunction.repr
     }
 
@@ -333,6 +348,11 @@ module DafnyCheck {
         // disjointness `testFunction.repr !! tc.repr` holds.
         assert tc.repr == {tc, tc.random};
         assert testFunction.repr !! tc.repr;
+        // tc.repr == {tc, tc.random == random.random}. `this` and `this.random`
+        // are fresh-distinct from tc, and Valid()'s distinctness facts keep them
+        // off random.random, so the RNG wrapper sits outside tc.repr.
+        assert this !in tc.repr;
+        assert this.random !in tc.repr;
         ApplyTestFunction(tc);
       }
     }
@@ -350,6 +370,12 @@ module DafnyCheck {
       requires calls < maxExamples
       requires testCase.Valid()
       requires testFunction.repr !! testCase.repr
+      // The TestingState wrapper and its RNG live outside the test case's repr.
+      // Dafny won't infer this from the (incompatible) types alone, so callers
+      // pass it explicitly; Generate discharges it from tc's freshness and the
+      // random/random.random distinctness recorded in Valid().
+      requires this !in testCase.repr
+      requires this.random !in testCase.repr
       modifies this, testCase, testCase.random, testFunction
       ensures Valid()
       ensures this.calls == old(this.calls) + 1
@@ -358,15 +384,14 @@ module DafnyCheck {
       ensures this.random.random == old(this.random.random)
       ensures this.testFunction == old(this.testFunction)
     {
+      // Apply's frame is {testCase, testCase.random, testFunction}. The
+      // TestingState `this` and its RandomGen `this.random` are outside that
+      // frame: distinct from testCase/testCase.random by the repr preconditions
+      // above, and from testFunction because Valid() gives them !in
+      // testFunction.repr while testFunction.Valid() puts testFunction in its
+      // own repr. So neither `this` nor `this.random` is touched, and the
+      // `this.random.random` reference is preserved across the call.
       var testResult := testFunction.Apply(testCase);
-      assert testFunction.repr == old(testFunction.repr);
-      assert this.repr == old(this.repr);
-      assert this.random == old(this.random);
-      // testFunction.Apply has modifies {tc, tc.random}; the random field on
-      // RandomGen is on a separate object (`this.random`), so its reference
-      // can't change. Dafny's frame inference doesn't propagate this through
-      // the trait boundary, so we assert it explicitly as an axiom.
-      assume {:axiom} this.random.random == old(this.random.random);
       calls := calls + 1;
       if testResult.IsValid() {
         validTestCases := validTestCases + 1;
@@ -901,7 +926,7 @@ module DafnyCheck {
     var rng := new SimpleRandomGen(seed);
     assert fresh(rng) && fresh(rng.random);
     // Fresh PredicateTest cannot alias the freshly-constructed rng or its inner random.
-    assume {:axiom} rng !in pt.repr && rng.random !in pt.repr;
+    assert rng !in pt.repr && rng.random !in pt.repr;
     var state := new TestingState<T>(rng, pt, numRuns, seed, cfg.classifier, cfg.verbosity, cfg.useColor);
     state.Run();
 
@@ -998,7 +1023,7 @@ module DafnyCheck {
     assert fresh(rng) && fresh(rng.random);
     // Fresh MethodTest cannot alias the freshly-constructed rng or its
     // inner random — same discharge as the predicate runner above.
-    assume {:axiom} rng !in mt.repr && rng.random !in mt.repr;
+    assert rng !in mt.repr && rng.random !in mt.repr;
     var state := new TestingState<Input>(rng, mt, numRuns, seed, cfg.classifier, cfg.verbosity, cfg.useColor);
     state.Run();
 
