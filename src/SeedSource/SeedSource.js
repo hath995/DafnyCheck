@@ -10,5 +10,9 @@ let SeedSource = (function () {
     const crypto = require('crypto');
     return crypto.randomBytes(8).readBigUInt64LE(0);   // bv64 is a BigInt in Dafny's JS runtime
   };
+  // Monotonic nanoseconds as a BigInt; only differences are consumed.
+  $module.NowNanos = function () {
+    return process.hrtime.bigint();
+  };
   return $module;
 })();

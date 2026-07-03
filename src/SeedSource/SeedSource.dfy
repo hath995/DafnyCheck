@@ -27,4 +27,10 @@
 module {:extern "SeedSource"} SeedSource {
   // A fresh, non-deterministic 64-bit value drawn from a platform entropy source.
   method {:extern} GetSeed() returns (s: bv64)
+
+  // A monotonic timestamp in nanoseconds, for measuring test-run durations.
+  // Like GetSeed this has no Dafny body, so code using it verifies with no
+  // native file; each backend links to NowNanos in this folder's SeedSource.*
+  // (see README). Only differences are consumed, so the origin is unspecified.
+  method {:extern} NowNanos() returns (t: bv64)
 }

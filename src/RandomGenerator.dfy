@@ -139,13 +139,4 @@ module RandomGenerator {
             c := new XoroShift128Plus(a, b);
         }
     }
-
-    method {:test} reals() {
-        var test := XoroShift128Plus.fromSeed(42);
-        var te, re := test.nextReal();
-        print(te);
-        print("\n");
-        print(te < 0.9);
-        print("\n");
-    }
 }

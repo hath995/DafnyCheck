@@ -22,36 +22,62 @@ module SeededTesting {
   import opened Std.Wrappers
   import opened SeedSource
 
-  // Like RunTest, but draws a fresh random seed for this run.
+  // Platform-backed monotonic clock: the concrete Clock the seeded runners inject
+  // so runs are timed out of the box. It lives here — not in the core — because
+  // Now() calls the SeedSource.NowNanos extern, which forces a native file at
+  // compile time for every consumer. Keeping it in SeededTesting means only tests
+  // that opt into seeded/timed runs need that file; plain DafnyCheck stays
+  // extern-free. NowNanos returns a bv64; we widen it to nat for the Clock API.
+  class SystemClock extends Clock {
+    constructor()
+      ensures fresh(this)
+    {}
+
+    method Now() returns (t: nat)
+    {
+      var n := NowNanos();
+      t := n as nat;
+    }
+  }
+
+  // Like RunTest, but draws a fresh random seed for this run and times it.
   method RunTestRandom<T(!new)>(pred: T -> bool, arb: Arbitrary<T>, name: string)
     returns (passed: bool)
     requires arb.Valid()
   {
     var seed := GetSeed();
-    passed := RunTestWithConfig(pred, arb, name, DefaultConfig<T>().(seed := Some(seed)));
+    var clk := new SystemClock();
+    passed := RunTestWithConfig(pred, arb, name,
+                                DefaultConfig<T>().(seed := Some(seed), clock := Some(clk)));
   }
 
-  // Like RunTestWithExamples, but with a fresh random seed.
+  // Like RunTestWithExamples, but with a fresh random seed and timing.
   method RunTestRandomWithExamples<T(!new)>(pred: T -> bool, arb: Arbitrary<T>, name: string, examples: nat)
     returns (passed: bool)
     requires arb.Valid()
     requires 0 < examples
   {
     var seed := GetSeed();
+    var clk := new SystemClock();
     passed := RunTestWithConfig(pred, arb, name,
-                                DefaultConfig<T>().(seed := Some(seed), numRuns := examples));
+                                DefaultConfig<T>().(seed := Some(seed), numRuns := examples, clock := Some(clk)));
   }
 
-  // Like RunTestWithConfig, but if the config leaves the seed unset (None), fill
-  // it with a fresh random seed; an explicit seed is respected (reproducible).
+  // Like RunTestWithConfig, but fills any unset field with a fresh default: a
+  // random seed if seed is None, and a SystemClock if clock is None. An explicit
+  // seed (reproducible) or an explicit/absent clock choice is respected.
   method RunTestRandomWithConfig<T(!new)>(pred: T -> bool, arb: Arbitrary<T>, name: string, cfg: RunConfig<T>)
     returns (passed: bool)
     requires arb.Valid()
   {
     var cfg' := cfg;
-    if cfg.seed.None? {
+    if cfg'.seed.None? {
       var seed := GetSeed();
-      cfg' := cfg.(seed := Some(seed));
+      cfg' := cfg'.(seed := Some(seed));
+    }
+    if cfg'.clock.None? {
+      var clk := new SystemClock();
+      cfg' := cfg'.(clock := Some(clk));
     }
     passed := RunTestWithConfig(pred, arb, name, cfg');
   }
@@ -62,17 +88,19 @@ module SeededTesting {
   // fresh seed from SeedSource.GetSeed() and delegates to RunMethodTestWithConfig.
   // ──────────────────────────────────────────────────────────────────────────
 
-  // Like RunMethodTest, but draws a fresh random seed for this run.
+  // Like RunMethodTest, but draws a fresh random seed for this run and times it.
   method RunMethodTestRandom<Input(!new), E(==)>(arb: Arbitrary<Input>, sut: MethodUnderTest<Input, E>, name: string)
     returns (passed: bool)
     requires arb.Valid()
     requires sut.Valid()
   {
     var seed := GetSeed();
-    passed := RunMethodTestWithConfig(arb, sut, name, DefaultConfig<Input>().(seed := Some(seed)));
+    var clk := new SystemClock();
+    passed := RunMethodTestWithConfig(arb, sut, name,
+                                      DefaultConfig<Input>().(seed := Some(seed), clock := Some(clk)));
   }
 
-  // Like RunMethodTestWithExamples, but with a fresh random seed.
+  // Like RunMethodTestWithExamples, but with a fresh random seed and timing.
   method RunMethodTestRandomWithExamples<Input(!new), E(==)>(
       arb: Arbitrary<Input>, sut: MethodUnderTest<Input, E>, name: string, examples: nat)
     returns (passed: bool)
@@ -81,12 +109,14 @@ module SeededTesting {
     requires 0 < examples
   {
     var seed := GetSeed();
+    var clk := new SystemClock();
     passed := RunMethodTestWithConfig(arb, sut, name,
-                                      DefaultConfig<Input>().(seed := Some(seed), numRuns := examples));
+                                      DefaultConfig<Input>().(seed := Some(seed), numRuns := examples, clock := Some(clk)));
   }
 
-  // Like RunMethodTestWithConfig, but if the config leaves the seed unset (None),
-  // fill it with a fresh random seed; an explicit seed is respected (reproducible).
+  // Like RunMethodTestWithConfig, but fills any unset field with a fresh default:
+  // a random seed if seed is None, and a SystemClock if clock is None. An
+  // explicit seed is respected (reproducible).
   method RunMethodTestRandomWithConfig<Input(!new), E(==)>(
       arb: Arbitrary<Input>, sut: MethodUnderTest<Input, E>, name: string, cfg: RunConfig<Input>)
     returns (passed: bool)
@@ -94,9 +124,13 @@ module SeededTesting {
     requires sut.Valid()
   {
     var cfg' := cfg;
-    if cfg.seed.None? {
+    if cfg'.seed.None? {
       var seed := GetSeed();
-      cfg' := cfg.(seed := Some(seed));
+      cfg' := cfg'.(seed := Some(seed));
+    }
+    if cfg'.clock.None? {
+      var clk := new SystemClock();
+      cfg' := cfg'.(clock := Some(clk));
     }
     passed := RunMethodTestWithConfig(arb, sut, name, cfg');
   }

@@ -8,4 +8,9 @@ public class __default {
   public static long GetSeed() {
     return new java.security.SecureRandom().nextLong();
   }
+
+  // Monotonic nanoseconds; only differences are consumed, origin unspecified.
+  public static long NowNanos() {
+    return System.nanoTime();
+  }
 }

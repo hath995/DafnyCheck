@@ -884,6 +884,17 @@ module DafnyCheck {
     }
   }
 
+  // Read the injected clock (nanoseconds since a monotonic origin) if one was
+  // supplied, else 0 when timing is off. Clock.Now() carries no modifies clause,
+  // so this touches no heap state and needs no framing at its call sites.
+  method TimeNow(clock: Option<Clock>) returns (t: nat) {
+    if clock.Some? {
+      t := clock.value.Now();
+    } else {
+      t := 0;
+    }
+  }
+
   // Top-level predicate-test entry points. All return `true` iff every
   // always-tested example and every generated case passed. RunTest and
   // RunTestWithExamples are thin delegators over RunTestWithConfig.
@@ -908,6 +919,7 @@ module DafnyCheck {
       returns (passed: bool)
     requires arb.Valid()
   {
+    var tRun0 := TimeNow(cfg.clock);
     passed := true;
     var i := 0;
     while i < |cfg.examples|
@@ -928,7 +940,13 @@ module DafnyCheck {
     // Fresh PredicateTest cannot alias the freshly-constructed rng or its inner random.
     assert rng !in pt.repr && rng.random !in pt.repr;
     var state := new TestingState<T>(rng, pt, numRuns, seed, cfg.classifier, cfg.verbosity, cfg.useColor);
-    state.Run();
+    // Run the two engine phases separately so each can be timed (High verbosity).
+    // This is exactly what state.Run() does inline.
+    var tTest0 := TimeNow(cfg.clock);
+    state.Generate();
+    var tGen1 := TimeNow(cfg.clock);
+    state.Shrink();
+    var tShr1 := TimeNow(cfg.clock);
 
     var res := state.GetResult();
     var valid := state.GetValidTestCases();
@@ -954,6 +972,13 @@ module DafnyCheck {
         }
     }
     Reporting.ReportStatistics(name, stats, cfg.useColor, cfg.verbosity);
+    var tRun1 := TimeNow(cfg.clock);
+    Reporting.ReportTiming(name, cfg.clock.Some?,
+                           Reporting.Duration(tRun0, tRun1),
+                           Reporting.Duration(tTest0, tShr1),
+                           Reporting.Duration(tTest0, tGen1),
+                           Reporting.Duration(tGen1, tShr1),
+                           cfg.useColor, cfg.verbosity);
   }
 
   // Method-test entry points — siblings of the predicate runners. Return
@@ -1000,6 +1025,7 @@ module DafnyCheck {
       returns (passed: bool, counterexample: Option<Input>)
     requires arb.Valid() requires sut.Valid()
   {
+    var tRun0 := TimeNow(cfg.clock);
     passed := true;
     counterexample := None;
     // Always-test examples by running the SUT directly on each.
@@ -1025,7 +1051,12 @@ module DafnyCheck {
     // inner random — same discharge as the predicate runner above.
     assert rng !in mt.repr && rng.random !in mt.repr;
     var state := new TestingState<Input>(rng, mt, numRuns, seed, cfg.classifier, cfg.verbosity, cfg.useColor);
-    state.Run();
+    // Split Run() into its two phases so each can be timed (High verbosity).
+    var tTest0 := TimeNow(cfg.clock);
+    state.Generate();
+    var tGen1 := TimeNow(cfg.clock);
+    state.Shrink();
+    var tShr1 := TimeNow(cfg.clock);
 
     var res := state.GetResult();
     var valid := state.GetValidTestCases();
@@ -1056,5 +1087,12 @@ module DafnyCheck {
         }
     }
     Reporting.ReportStatistics(name, stats, cfg.useColor, cfg.verbosity);
+    var tRun1 := TimeNow(cfg.clock);
+    Reporting.ReportTiming(name, cfg.clock.Some?,
+                           Reporting.Duration(tRun0, tRun1),
+                           Reporting.Duration(tTest0, tShr1),
+                           Reporting.Duration(tTest0, tGen1),
+                           Reporting.Duration(tGen1, tShr1),
+                           cfg.useColor, cfg.verbosity);
   }
 }
