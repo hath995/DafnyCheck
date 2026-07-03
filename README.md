@@ -93,16 +93,3 @@ var uuid := ExtIdentifiers.UUID();                                        // UUI
 
 The full set — primitives, collections, tuples, bit vectors, arrays, `Map`/`Mix`/`FlatMap`, and
 the `Registry` letrec for recursive datatypes — is in [Arbitrary.md](src/Arbitrary.md).
-
-## Known limitations
-
-A handful of "decreases clause might not decrease" obligations in `src/Arbitrary.dfy` are known
-and documented inline. They all stem from generators that re-enter generator code through dynamic
-dispatch, which the trait's repr-based termination metric can't reconcile:
-
-- `FlatMap` (`Transformable.Apply` and `Arbitrary.Valid`).
-- `Mix.Valid` (`possibilities[i].Valid()`).
-- The `letrec` `LazyArbitrary.Apply` resolve step — recursion is bounded at runtime by the
-  `maxDepth` budget, but proving that through the registry/dispatch is future work.
-
-Everything else verifies cleanly, and all of these generators run correctly.

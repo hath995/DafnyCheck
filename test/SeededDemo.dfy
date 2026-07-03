@@ -1,8 +1,8 @@
-include "./SeededTesting.dfy"
+include "../src/SeedSource/SeededTesting.dfy"
 
-// Demonstrates the random-seeded runner end to end. Run it (twice) with a native
-// file to see a different fresh seed each run, e.g.:
-//   dafny run --target:cs SeededDemo.dfy --input SeedSource.cs
+// Demonstrates the random-seeded runner end to end. Run it (twice) from this
+// test/ directory with a native file to see a different fresh seed each run, e.g.:
+//   dafny run --target:cs SeededDemo.dfy --input ../src/SeedSource/SeedSource.cs
 //
 // Main is in the default module (see SeedSourceDemo.dfy for why, re: Java).
 import opened SeedSource

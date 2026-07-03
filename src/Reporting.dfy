@@ -87,6 +87,52 @@ module Reporting {
     }
   }
 
+  // ── Timing ────────────────────────────────────────────────────────────────
+
+  // Saturating elapsed time between two monotonic timestamps (nanoseconds). A
+  // well-behaved monotonic clock gives endNs >= startNs; we clamp to 0 rather
+  // than underflow if a backend clock ever hiccups.
+  function Duration(startNs: nat, endNs: nat): nat {
+    if endNs >= startNs then endNs - startNs else 0
+  }
+
+  // Left-pad a sub-1000 value to exactly three digits (the fractional-ms field).
+  function Pad3(n: nat): string
+    requires n < 1000
+  {
+    var s := IntToString(n);
+    if |s| >= 3 then s else if |s| == 2 then "0" + s else "00" + s
+  }
+
+  // Render a nanosecond duration as milliseconds with three fractional digits,
+  // e.g. 12_345_678 -> "12.345 ms". Millisecond granularity reads well for whole
+  // runs while still resolving fast individual phases.
+  function FormatNanos(ns: nat): string {
+    var ms := ns / 1_000_000;
+    var frac := (ns % 1_000_000) / 1_000;   // 0..999: microsecond thousandths of a ms
+    IntToString(ms) + "." + Pad3(frac) + " ms"
+  }
+
+  // Print run timing, gated by verbosity (cumulative):
+  //   Low    - whole-run wall time
+  //   Medium - + per-test time (generation + shrinking for this property)
+  //   High   - + the generation and shrinking phases broken out
+  // No-op unless `timingOn` (a clock was supplied) and verbosity is above Off.
+  method ReportTiming(name: string, timingOn: bool,
+                      runNs: nat, testNs: nat, genNs: nat, shrinkNs: nat,
+                      useColor: bool, verbosity: Verbosity)
+  {
+    if timingOn && verbosity != Off {
+      print Colorize("[" + name + "] time", CYAN, useColor), " run=", FormatNanos(runNs), "\n";
+      if AtLeast(verbosity, Medium) {
+        print "  test=", FormatNanos(testNs), "\n";
+      }
+      if AtLeast(verbosity, High) {
+        print "  gen=", FormatNanos(genNs), " shrink=", FormatNanos(shrinkNs), "\n";
+      }
+    }
+  }
+
   // Sum of all bucket counts in a classification map.
   function TotalCount(stats: map<string, nat>): nat {
     SumCounts(stats, SetToSequence(stats.Keys))

@@ -7,25 +7,33 @@ one `{:extern}` method and implement it natively for every Dafny backend.
 
 ```dafny
 module {:extern "SeedSource"} SeedSource {
-  method {:extern} GetSeed() returns (s: bv64)   // fresh 64-bit value from a platform CSPRNG
+  method {:extern} GetSeed() returns (s: bv64)    // fresh 64-bit value from a platform CSPRNG
+  method {:extern} NowNanos() returns (t: bv64)   // monotonic timestamp in nanoseconds
 }
 ```
 
-Code that *uses* `GetSeed()` still **verifies** without any native file (the
-method has no body). Only **compiling/running** for a target needs that target's
+Code that *uses* these still **verifies** without any native file (the methods
+have no body). Only **compiling/running** for a target needs that target's
 native file, passed with `--input`.
+
+`NowNanos()` backs the optional **run timing** in the seeded runners (see below):
+only *differences* are consumed, so the origin is unspecified. Each backend's
+`SeedSource.*` in this folder implements both functions; a custom native file
+must supply `NowNanos` too if it drives the seeded/timed runners.
 
 ## Files & per-target build/run
 
-`SeedSourceDemo.dfy` prints two seeds. Run it from this directory:
+`test/SeedSourceDemo.dfy` prints two seeds. The demo lives under `test/`; the
+native files stay here in `src/SeedSource/`. Run it **from the `test/` directory**
+(paths below are relative to `test/`):
 
-| Target | Native file | Command |
+| Target | Native file | Command (run from `test/`) |
 |---|---|---|
-| C# | `SeedSource.cs` | `dafny run --target:cs SeedSourceDemo.dfy --input SeedSource.cs` |
-| Python | `SeedSource.py` | `dafny run --target:py SeedSourceDemo.dfy --input SeedSource.py` |
-| Go | `SeedSource.go` | `dafny run --target:go SeedSourceDemo.dfy --input SeedSource.go` |
-| JavaScript | `SeedSource.js` | `dafny run --target:js SeedSourceDemo.dfy --input SeedSource.js` |
-| Java | `java/SeedSource/__default.java` | `dafny run --target:java SeedSourceDemo.dfy --input java/SeedSource/__default.java` |
+| C# | `SeedSource.cs` | `dafny run --target:cs SeedSourceDemo.dfy --input ../src/SeedSource/SeedSource.cs` |
+| Python | `SeedSource.py` | `dafny run --target:py SeedSourceDemo.dfy --input ../src/SeedSource/SeedSource.py` |
+| Go | `SeedSource.go` | `dafny run --target:go SeedSourceDemo.dfy --input ../src/SeedSource/SeedSource.go` |
+| JavaScript | `SeedSource.js` | `dafny run --target:js SeedSourceDemo.dfy --input ../src/SeedSource/SeedSource.js` |
+| Java | `java/SeedSource/__default.java` | `dafny run --target:java SeedSourceDemo.dfy --input ../src/SeedSource/java/SeedSource/__default.java` |
 
 All five have been verified to produce a fresh random 64-bit value per call.
 
@@ -63,12 +71,29 @@ import opened SeededTesting
 ...
 var ok := RunTestRandom(pred, arb, name);                       // fresh seed each run
 var ok := RunTestRandomWithExamples(pred, arb, name, 500);      // + run count
-var ok := RunTestRandomWithConfig(pred, arb, name, cfg);        // fills cfg.seed only if None
+var ok := RunTestRandomWithConfig(pred, arb, name, cfg);        // fills cfg.seed/cfg.clock if None
 ```
 
-`SeededDemo.dfy` is a runnable example (`dafny run --standard-libraries
---target:cs SeededDemo.dfy --input SeedSource.cs`); run it twice to see a fresh
-seed each time.
+### Run timing
+
+The seeded runners also inject a `SystemClock` (backed by `NowNanos`), so runs
+are **timed** by default. How much prints is gated by `cfg.verbosity`:
+
+| Verbosity | Timing printed |
+|---|---|
+| `Off`    | nothing |
+| `Low`    | whole-run wall time (`run=…`) |
+| `Medium` | + per-test time (generation + shrinking) (`test=…`) |
+| `High`   | + the generation and shrinking phases (`gen=… shrink=…`) |
+
+Timing is a plain `RunConfig` option (`clock: Option<Clock>`), so the core
+`RunTestWithConfig` / `RunMethodTestWithConfig` runners can be timed too — supply
+a `Clock` (e.g. `new SeededTesting.SystemClock()`) via `cfg.clock`. Left `None`
+(the default for `DefaultConfig()`), a run is untimed and stays extern-free.
+
+`test/SeededDemo.dfy` is a runnable example (run from `test/`: `dafny run
+--standard-libraries --target:cs SeededDemo.dfy --input
+../src/SeedSource/SeedSource.cs`); run it twice to see a fresh seed each time.
 
 This lives in its own module on purpose: because `GetSeed` is `{:extern}`, any
 module that references it forces the native file at compile time for *every*
