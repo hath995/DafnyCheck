@@ -1,0 +1,24 @@
+[package]
+name = "dafnycheck"
+version = "1.0.0"
+description = "Property-based testing for Dafny, à la Hypothesis/Minithesis: composable generators that shrink failures to a minimal counterexample"
+repository = "https://github.com/hath995/DafnyCheck"
+license = "MIT"
+keywords = ["testing", "property-based", "quickcheck", "shrinking", "generators"]
+targets = ["cs", "java", "go", "js", "py"]
+
+[toolchain]
+dafny = ">= 4.10.0"
+
+[source]
+include = ["src/**/*.dfy"]
+exclude = ["src/**/*Demo.dfy"]
+
+[options]
+standard-libraries = true
+
+[verification]
+expected-errors = [
+]
+
+[dependencies]
